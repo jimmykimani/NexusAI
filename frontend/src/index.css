@@ -1,0 +1,170 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;1,9..144,400;1,9..144,500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ---------- Light theme (default) ---------- */
+  :root {
+    --nexus-bg: 250 250 249;
+    --nexus-surface: 255 255 255;
+    --nexus-card: 255 255 255;
+    --nexus-elevated: 243 244 246;
+    --nexus-border: 229 231 235;
+    --nexus-muted: 107 114 128;
+    --nexus-subtle: 75 85 99;
+    --nexus-text: 17 24 39;
+    --nexus-accent: 22 163 74;
+    --nexus-hot: 219 39 119;
+
+    /* Subtle overlay used in place of bg-white/[0.xx] on dark or bg-black/[0.xx]
+       on light. Lives as an RGB triple + alpha so it always stays readable. */
+    --nexus-overlay: 17 24 39;
+    --nexus-overlay-strong: 17 24 39;
+
+    /* Primary button fill and text — inverted between themes so the CTA always
+       contrasts with the page. */
+    --nexus-cta-bg: 17 24 39;
+    --nexus-cta-fg: 255 255 255;
+  }
+
+  /* ---------- Dark theme (neutral black, no blue cast) ---------- */
+  .dark {
+    --nexus-bg: 8 8 9;
+    --nexus-surface: 14 14 15;
+    --nexus-card: 20 20 22;
+    --nexus-elevated: 28 28 30;
+    --nexus-border: 42 42 45;
+    --nexus-muted: 120 120 125;
+    --nexus-subtle: 160 160 165;
+    --nexus-text: 234 234 236;
+    --nexus-accent: 34 197 94;
+    --nexus-hot: 244 114 182;
+
+    --nexus-overlay: 255 255 255;
+    --nexus-overlay-strong: 255 255 255;
+
+    --nexus-cta-bg: 255 255 255;
+    --nexus-cta-fg: 8 8 9;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    background-color: rgb(var(--nexus-bg));
+    color: rgb(var(--nexus-text));
+    font-family:
+      'Inter',
+      system-ui,
+      -apple-system,
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  * {
+    border-color: rgb(var(--nexus-border));
+  }
+
+  ::selection {
+    background: rgb(var(--nexus-accent) / 0.3);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--nexus-border));
+    border-radius: 8px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--nexus-elevated));
+  }
+}
+
+@layer components {
+  /* Results panel: horizontal scroll lives here only (narrow split vs wide table). */
+  .leads-table-scroll {
+    overscroll-behavior-x: contain;
+    overscroll-behavior-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm
+           text-nexus-subtle hover:text-nexus-text hover:bg-nexus-elevated
+           border border-transparent hover:border-nexus-border transition-colors;
+  }
+
+  /* Primary CTA — contrast button that inverts with the theme. */
+  .btn-primary {
+    background-color: rgb(var(--nexus-cta-bg));
+    color: rgb(var(--nexus-cta-fg));
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full
+           font-medium text-sm hover:opacity-90 active:opacity-80
+           disabled:opacity-40 disabled:cursor-not-allowed transition;
+  }
+
+  .btn-primary-dark {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full
+           bg-nexus-bg text-nexus-text font-medium text-sm border border-nexus-border
+           hover:bg-nexus-elevated disabled:opacity-40
+           disabled:cursor-not-allowed transition;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md
+           bg-nexus-card text-nexus-text font-medium text-sm border border-nexus-border
+           hover:bg-nexus-elevated disabled:opacity-50 transition;
+  }
+
+  .input-base {
+    @apply w-full bg-nexus-card border border-nexus-border rounded-md
+           px-3 py-2 text-sm text-nexus-text placeholder:text-nexus-muted
+           focus:outline-none focus:border-nexus-accent/60
+           focus:ring-1 focus:ring-nexus-accent/20 transition;
+  }
+
+  .card {
+    @apply bg-nexus-card border border-nexus-border rounded-lg;
+  }
+
+  /* Match pill: green dot + % — used on every lead row */
+  .match-pill {
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md
+           text-xs font-medium text-nexus-accent bg-nexus-accent/10;
+  }
+
+  .match-pill-muted {
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md
+           text-xs font-medium text-nexus-subtle bg-nexus-elevated;
+  }
+
+  /* Small label chip used for category labels (theme-aware surface). */
+  .chip {
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md
+           text-xs text-nexus-subtle bg-nexus-elevated border border-nexus-border;
+  }
+
+  /* Subtle overlay surface — replaces raw `bg-white/[0.04]` so it works in
+     both themes. Uses a theme-aware tint. */
+  .surface-subtle {
+    background-color: rgb(var(--nexus-overlay) / 0.04);
+    border-color: rgb(var(--nexus-overlay) / 0.08);
+  }
+  .surface-subtle:hover {
+    background-color: rgb(var(--nexus-overlay) / 0.08);
+    border-color: rgb(var(--nexus-overlay) / 0.14);
+  }
+
+  /* Italic serif accent — used on hero headings */
+  .serif-italic {
+    @apply font-display italic font-normal;
+  }
+}
