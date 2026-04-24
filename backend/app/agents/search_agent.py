@@ -1,10 +1,10 @@
-"""Search agent — queries Tavily across platforms and extracts structured profiles.
+"""Search agent — Tavily + optional Apollo + optional Scrupp (Apollo via Scrupp), then LLM extract.
 
-Covers every kind of person (creators, execs, engineers, talent, researchers) by:
-1. Running 6-8 parallel Tavily queries produced by the Supervisor.
-2. Pulling richer content per query (more results, advanced depth).
-3. Asking the LLM to extract up to ~25 profiles with social handles, follower
-   counts, avatar URLs and a short AI summary.
+1. Runs Tavily in parallel with optional direct Apollo People API and optional
+   Scrupp ``/apollo/search`` export (when ``SCRUPP_API_KEY`` and linked-account
+   ``SCRUPP_APOLLO_ACCOUNT`` / ``APOLLO_LOGIN_EMAIL`` are set — uses an Apollo hash URL).
+2. Feeds deduped Tavily pages to the LLM to extract profiles.
+3. Merges directory/export rows after extraction (deduped by name / social URL).
 """
 from __future__ import annotations
 
@@ -18,7 +18,12 @@ from tavily import TavilyClient
 
 from app.agents.state import NexusState
 from app.core.config import settings
+from app.services.apollo_people import search_people as apollo_search_people
 from app.services.llm import llm_chat
+from app.services.scrupp_apollo import (
+    export_people_via_scrupp,
+    scrupp_apollo_export_configured,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,26 +155,129 @@ async def _run_all_searches(queries: list[str]) -> list[dict[str, Any]]:
     return merged
 
 
+def _try_add_profile(
+    bucket: list[dict[str, Any]],
+    seen: set[str],
+    p: dict[str, Any],
+) -> None:
+    """Append one profile if name is present and dedupe key is new."""
+    if not isinstance(p, dict):
+        return
+    name = (p.get("name") or "").strip().lower()
+    if not name:
+        return
+    social_key = next(
+        (
+            (p.get(f) or "").strip().lower()
+            for f in (
+                "linkedin_url",
+                "twitter_url",
+                "instagram_url",
+                "tiktok_url",
+                "youtube_url",
+                "github_url",
+                "website_url",
+            )
+            if p.get(f)
+        ),
+        "",
+    )
+    key = f"{name}|{social_key}"
+    if key in seen:
+        return
+    seen.add(key)
+    bucket.append(p)
+
+
 async def search_node(state: NexusState) -> NexusState:
     """Searches Tavily across platforms and extracts structured profiles."""
     queries_all = state.get("search_queries", []) or []
     queries = [q for q in queries_all if isinstance(q, str) and q.strip()][:MAX_QUERIES]
 
+    use_apollo = bool((settings.APOLLO_API_KEY or "").strip())
+    use_scrupp = scrupp_apollo_export_configured()
+    extra = []
+    if use_apollo:
+        extra.append("direct Apollo people API")
+    if use_scrupp:
+        extra.append("Scrupp Apollo export")
+    extra_txt = f" Also running in parallel: {', '.join(extra)}." if extra else ""
     events = [
         {
             "type": "searching",
             "message": (
                 f"I'm live-searching the open web now — {len(queries)} focused passes "
                 "across the platforms in your plan."
+                + extra_txt
             ),
-            "data": {"query_count": len(queries)},
+            "data": {
+                "query_count": len(queries),
+                "apollo": use_apollo,
+                "scrupp": use_scrupp,
+            },
         }
     ]
 
     if not queries:
         return {"raw_results": [], "status": "ranking", "events": events}
 
-    raw_sources = await _run_all_searches(queries)
+    criteria = state.get("criteria", {}) or {}
+
+    async def _apollo_branch() -> list[dict[str, Any]]:
+        if not use_apollo:
+            return []
+        try:
+            return await apollo_search_people(criteria, queries)
+        except Exception as exc:
+            logger.warning("Apollo parallel search failed: %s", exc)
+            return []
+
+    async def _scrupp_branch() -> list[dict[str, Any]]:
+        if not use_scrupp:
+            return []
+        try:
+            return await export_people_via_scrupp(criteria)
+        except Exception as exc:
+            logger.warning("Scrupp Apollo export failed: %s", exc)
+            return []
+
+    raw_sources, apollo_profiles, scrupp_profiles = await asyncio.gather(
+        _run_all_searches(queries),
+        _apollo_branch(),
+        _scrupp_branch(),
+    )
+
+    apollo_n = len(apollo_profiles) if isinstance(apollo_profiles, list) else 0
+    scrupp_n = len(scrupp_profiles) if isinstance(scrupp_profiles, list) else 0
+    if use_apollo:
+        events.append(
+            {
+                "type": "searching",
+                "message": (
+                    "Apollo People Search: queried the Apollo people directory in parallel "
+                    f"({apollo_n} people returned). "
+                    "These merge after the web pass; rows that match the same person as a "
+                    "web result are deduplicated."
+                ),
+                "data": {
+                    "source": "apollo",
+                    "apollo_people_returned": apollo_n,
+                },
+            }
+        )
+
+    if use_scrupp:
+        events.append(
+            {
+                "type": "searching",
+                "message": (
+                    "Scrupp (Apollo export): finished an Apollo people-list export via Scrupp "
+                    f"({scrupp_n} profile rows). "
+                    "These merge after the web pass like other directory results."
+                ),
+                "data": {"source": "scrupp", "scrupp_rows": scrupp_n},
+            }
+        )
 
     # Deduplicate sources by URL to avoid feeding the LLM duplicates.
     seen_urls: set[str] = set()
@@ -185,10 +293,24 @@ async def search_node(state: NexusState) -> NexusState:
         {
             "type": "found",
             "message": (
-                f"Pulled {len(deduped)} solid sources — now extracting named people and "
-                "their socials into structured rows."
+                f"Pulled {len(deduped)} solid web sources"
+                + (
+                    f" (Apollo API: {apollo_n} directory rows — see note above)"
+                    if use_apollo
+                    else ""
+                )
+                + (
+                    f" (Scrupp export: {scrupp_n} rows — see note above)"
+                    if use_scrupp
+                    else ""
+                )
+                + " — now extracting named people and their socials into structured rows."
             ),
-            "data": {"source_count": len(deduped)},
+            "data": {
+                "source_count": len(deduped),
+                "apollo_people_count": apollo_n,
+                "scrupp_rows": scrupp_n,
+            },
         }
     )
 
@@ -224,31 +346,63 @@ async def search_node(state: NexusState) -> NexusState:
     seen: set[str] = set()
     unique: list[dict[str, Any]] = []
     for p in profiles:
-        if not isinstance(p, dict):
-            continue
-        name = (p.get("name") or "").strip().lower()
-        if not name:
-            continue
-        social_key = next(
-            (
-                (p.get(f) or "").strip().lower()
-                for f in (
-                    "linkedin_url",
-                    "twitter_url",
-                    "instagram_url",
-                    "tiktok_url",
-                    "youtube_url",
-                    "github_url",
-                    "website_url",
-                )
-                if p.get(f)
-            ),
-            "",
+        _try_add_profile(unique, seen, p)
+
+    n_after_web_extract = len(unique)
+    if isinstance(apollo_profiles, list):
+        for p in apollo_profiles:
+            _try_add_profile(unique, seen, p)
+
+    n_after_apollo = len(unique)
+    if isinstance(scrupp_profiles, list):
+        for p in scrupp_profiles:
+            _try_add_profile(unique, seen, p)
+
+    if use_apollo:
+        apollo_new = len(unique) - n_after_web_extract
+        dup = max(0, apollo_n - apollo_new)
+        events.append(
+            {
+                "type": "searching",
+                "message": (
+                    f"Apollo merge: {apollo_new} new row(s) added from the directory "
+                    f"({dup} overlapped people we already had from the web extraction)."
+                    if apollo_n
+                    else (
+                        "Apollo merge: directory returned 0 people for this filter set — "
+                        "check server logs, widen criteria, or confirm the API key has "
+                        "People Search access."
+                    )
+                ),
+                "data": {
+                    "source": "apollo_merge",
+                    "apollo_returned": apollo_n,
+                    "apollo_new_rows": apollo_new if apollo_n else 0,
+                },
+            }
         )
-        key = f"{name}|{social_key}"
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(p)
+
+    if use_scrupp:
+        scrupp_new = len(unique) - n_after_apollo
+        scrupp_dup = max(0, scrupp_n - scrupp_new)
+        events.append(
+            {
+                "type": "searching",
+                "message": (
+                    f"Scrupp merge: {scrupp_new} new row(s) from the export "
+                    f"({scrupp_dup} overlapped existing web or Apollo rows)."
+                    if scrupp_n
+                    else (
+                        "Scrupp merge: export returned 0 rows — check Scrupp credits, "
+                        "Apollo URL filters, or Scrupp API logs."
+                    )
+                ),
+                "data": {
+                    "source": "scrupp_merge",
+                    "scrupp_returned": scrupp_n,
+                    "scrupp_new_rows": scrupp_new if scrupp_n else 0,
+                },
+            }
+        )
 
     return {"raw_results": unique, "status": "ranking", "events": events}

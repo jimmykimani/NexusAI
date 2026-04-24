@@ -25,9 +25,28 @@ from app.schemas.search import (
     SearchStartResponse,
 )
 from app.services.graph_runner import format_sse, run_graph_streaming
+from app.services.llm_runtime import LLMRequestOverride, validate_override
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _llm_override_from_stream_request(request: Request) -> LLMRequestOverride | None:
+    """Parse optional per-search LLM selection from SSE query string."""
+    p = request.query_params.get("llm_provider")
+    r = request.query_params.get("llm_reasoning_model")
+    f = request.query_params.get("llm_fast_model")
+    if not p and not r and not f:
+        return None
+    if not p or not r or not f:
+        raise HTTPException(
+            status_code=400,
+            detail="Send all of llm_provider, llm_reasoning_model, and llm_fast_model, or omit all three.",
+        )
+    try:
+        return validate_override(p, r, f)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _title_from_query(q: str, max_len: int = 60) -> str:
@@ -148,10 +167,11 @@ async def stream_search(
     query = ss.original_query
     sess_id = ss.id
     uid = user.id
+    llm_override = _llm_override_from_stream_request(request)
 
     async def event_generator():
         try:
-            async for event in run_graph_streaming(query, sess_id, uid):
+            async for event in run_graph_streaming(query, sess_id, uid, llm_override=llm_override):
                 if await request.is_disconnected():
                     break
                 yield format_sse(event)

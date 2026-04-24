@@ -1,5 +1,6 @@
 import { ArrowUp, Briefcase, Loader2, Megaphone, TrendingUp, Users } from 'lucide-react'
 import type { KeyboardEvent } from 'react'
+import { ChatModelPicker } from '@/components/chat/ChatModelPicker'
 import { useSearch } from '@/hooks/useSearch'
 
 type ExampleChip = {
@@ -48,7 +49,7 @@ export function HeroSearch() {
   }
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 bg-nexus-bg relative overflow-hidden">
+    <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 bg-nexus-bg relative overflow-x-hidden overflow-y-visible">
       {/* very subtle ambient glow, no purple */}
       <div
         aria-hidden
@@ -67,9 +68,9 @@ export function HeroSearch() {
         </h1>
 
         <div
-          className="rounded-2xl bg-nexus-card border border-nexus-border
+          className="relative z-10 rounded-2xl bg-nexus-card border border-nexus-border
                      shadow-[0_12px_40px_-12px_rgba(0,0,0,0.25)]
-                     focus-within:border-nexus-accent/40 transition-colors"
+                     focus-within:border-nexus-accent/40 transition-colors overflow-visible"
         >
           <textarea
             value={query}
@@ -82,16 +83,18 @@ export function HeroSearch() {
                        border-0 focus:outline-none focus:ring-0
                        text-[15px] placeholder:text-nexus-muted leading-relaxed min-h-[5.5rem]"
           />
-          <div className="flex items-center justify-between gap-3 px-3 pb-3">
-            <span className="text-xs text-nexus-muted px-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-3">
+            <span className="text-xs text-nexus-muted px-1 order-2 sm:order-1 flex-1 min-w-[8rem]">
               {isSearching ? 'Running agents…' : 'Enter to search · Shift+Enter for newline'}
             </span>
-            <button
-              type="button"
-              onClick={() => void submit()}
-              disabled={isSearching || !query.trim()}
-              className="btn-primary py-2 px-5"
-            >
+            <div className="flex items-center gap-2 order-1 sm:order-2 ml-auto sm:ml-0">
+              <ChatModelPicker disabled={isSearching} />
+              <button
+                type="button"
+                onClick={() => void submit()}
+                disabled={isSearching || !query.trim()}
+                className="btn-primary py-2 px-5"
+              >
               {isSearching ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -103,7 +106,8 @@ export function HeroSearch() {
                   <ArrowUp className="w-4 h-4" />
                 </>
               )}
-            </button>
+              </button>
+            </div>
           </div>
         </div>
 

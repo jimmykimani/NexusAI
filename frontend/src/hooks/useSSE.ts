@@ -25,7 +25,19 @@ export function useSSE(sessionId: string | null): void {
     let es: EventSource | null = null
 
     async function connect() {
-      const url = await buildSseUrl(sessionId!)
+      const llm = useSearchStore.getState().streamLlmParams
+      let llmSuffix = ''
+      if (llm) {
+        const p = new URLSearchParams()
+        p.set('llm_provider', llm.provider)
+        p.set('llm_reasoning_model', llm.reasoningModel)
+        p.set('llm_fast_model', llm.fastModel)
+        llmSuffix = `&${p.toString()}`
+      }
+      const url = await buildSseUrl(sessionId!, llmSuffix)
+      if (llm) {
+        useSearchStore.getState().setStreamLlmParams(null)
+      }
       if (cancelled) return
       es = new EventSource(url)
       esRef.current = es

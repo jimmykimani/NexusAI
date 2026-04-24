@@ -1,5 +1,6 @@
 import { ArrowUp, Loader2, Plus } from 'lucide-react'
 import { useEffect, useRef, type KeyboardEvent } from 'react'
+import { ChatModelPicker } from './ChatModelPicker'
 import { cn } from '@/lib/cn'
 
 interface Props {
@@ -58,16 +59,18 @@ export function SearchInput({
         rows={1}
         className="w-full resize-none bg-transparent border-0 focus:outline-none focus:ring-0 text-sm placeholder:text-nexus-muted leading-relaxed"
       />
-      <div className="flex items-center justify-between mt-1.5">
-        <span className="text-[11px] text-nexus-muted inline-flex items-center gap-1">
-          <Plus className="w-3 h-3" />
+      <div className="flex items-center gap-2 mt-1.5">
+        <span className="text-[11px] text-nexus-muted inline-flex items-center gap-1 min-w-0 shrink">
+          <Plus className="w-3 h-3 shrink-0" />
           {disabled ? 'Running…' : 'Attach context (soon)'}
         </span>
+        <span className="flex-1 min-w-[0.5rem]" aria-hidden />
+        <ChatModelPicker disabled={disabled} menuPlacement="up" />
         <button
           type="button"
           onClick={onSubmit}
           disabled={disabled || !value.trim()}
-          className="btn-primary w-8 h-8 p-0 rounded-full"
+          className="btn-primary w-8 h-8 p-0 rounded-full shrink-0"
           aria-label="Send"
         >
           {disabled ? (

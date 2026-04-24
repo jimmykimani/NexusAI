@@ -1,7 +1,8 @@
 """Short persona-driven copy streamed before/after the search graph runs.
 
-Uses OpenAI streaming when LLM_PROVIDER=openai; otherwise falls back to a
-single non-stream completion and yields it in one chunk.
+Uses token streaming for OpenAI-compatible providers (openai, groq, openrouter)
+when the corresponding API key is set; otherwise uses ``llm_chat`` and yields
+word chunks (including all Anthropic runs).
 """
 from __future__ import annotations
 
@@ -9,8 +10,12 @@ import asyncio
 import logging
 from typing import Any, AsyncIterator
 
-from app.core.config import settings
-from app.services.llm import llm_chat
+from app.services.llm import (
+    llm_chat,
+    openai_style_async_client,
+    should_use_openai_sdk_streaming,
+)
+from app.services.llm_runtime import effective_model
 
 logger = logging.getLogger(__name__)
 
@@ -26,17 +31,13 @@ Encourage them to scan the table and open profiles. No bullet lists, no JSON.
 Stay under 160 words."""
 
 
-def _reasoning_model() -> str:
-    return settings.OPENAI_REASONING_MODEL
-
-
 async def stream_intro_narrative(user_query: str) -> AsyncIterator[str]:
     """Yield streamed text tokens for the opening assistant message."""
     q = (user_query or "").strip()
     if not q:
         return
 
-    if settings.LLM_PROVIDER != "openai" or not settings.OPENAI_API_KEY:
+    if not should_use_openai_sdk_streaming():
         text = llm_chat(
             INTRO_SYSTEM,
             f"User search:\n{q}",
@@ -48,12 +49,10 @@ async def stream_intro_narrative(user_query: str) -> AsyncIterator[str]:
             yield part
         return
 
-    from openai import AsyncOpenAI  # noqa: PLC0415
-
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = openai_style_async_client()
     try:
         stream = await client.chat.completions.create(
-            model=_reasoning_model(),
+            model=effective_model("reasoning"),
             max_tokens=220,
             temperature=0.45,
             messages=[
@@ -92,7 +91,7 @@ async def stream_outro_narrative(
         f"Total rows in table: {len(leads)}."
     )
 
-    if settings.LLM_PROVIDER != "openai" or not settings.OPENAI_API_KEY:
+    if not should_use_openai_sdk_streaming():
         text = llm_chat(
             OUTRO_SYSTEM,
             ctx,
@@ -104,12 +103,10 @@ async def stream_outro_narrative(
             yield part
         return
 
-    from openai import AsyncOpenAI  # noqa: PLC0415
-
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = openai_style_async_client()
     try:
         stream = await client.chat.completions.create(
-            model=_reasoning_model(),
+            model=effective_model("reasoning"),
             max_tokens=320,
             temperature=0.4,
             messages=[
@@ -131,7 +128,7 @@ async def stream_outro_narrative(
 
 
 async def _chunk_words(text: str) -> AsyncIterator[str]:
-    """Split plain text into word chunks for a faux stream (non-OpenAI path)."""
+    """Split plain text into word chunks for a faux stream (non-streaming SDK path)."""
     words = (text or "").split()
     for i, w in enumerate(words):
         yield w + (" " if i < len(words) - 1 else "")

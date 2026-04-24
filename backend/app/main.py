@@ -1,6 +1,8 @@
 """FastAPI application entry point for NexusAI."""
 from __future__ import annotations
 
+import app.langchain_compat  # noqa: F401 — before langgraph/langchain_core pull old attrs
+
 import logging
 from contextlib import asynccontextmanager
 

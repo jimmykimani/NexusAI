@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import re
@@ -90,7 +91,9 @@ async def ranking_node(state: NexusState) -> NexusState:
             }
 
     # Score profiles concurrently so 20+ leads don't queue one-by-one.
-    tasks = [asyncio.to_thread(_score_one, p) for p in raw_results]
+    # Preserve ContextVar LLM overrides (chat UI) inside thread workers.
+    ctx = contextvars.copy_context()
+    tasks = [asyncio.to_thread(ctx.run, _score_one, p) for p in raw_results]
     scored = list(await asyncio.gather(*tasks)) if tasks else []
 
     scored.sort(key=lambda x: x.get("match_score", 0), reverse=True)

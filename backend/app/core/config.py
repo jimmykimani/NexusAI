@@ -4,7 +4,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import List
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,9 +21,41 @@ class Settings(BaseSettings):
     # LLMs
     ANTHROPIC_API_KEY: str = Field(default="")
     OPENAI_API_KEY: str = Field(default="")
+    GROQ_API_KEY: str = Field(default="")
+    OPENROUTER_API_KEY: str = Field(default="")
 
     # Search
     TAVILY_API_KEY: str = Field(default="")
+    # Optional: Apollo.io People Search (merged with Tavily). Accepts common env names.
+    APOLLO_API_KEY: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "APOLLO_API_KEY",
+            "APOLLO_KEY",
+            "APOLLO_IO_API_KEY",
+            "APOLLO_MASTER_API_KEY",
+        ),
+    )
+    # Optional: Apollo login email (same value Scrupp often expects in ``account`` for linked Apollo).
+    APOLLO_LOGIN_EMAIL: str = Field(
+        default="",
+        validation_alias=AliasChoices("APOLLO_LOGIN_EMAIL", "APOLLO_ACCOUNT_EMAIL"),
+    )
+    # Scrupp: Apollo people export via https://api.scrupp.com (Bearer or api_key).
+    SCRUPP_API_KEY: str = Field(
+        default="",
+        validation_alias=AliasChoices("SCRUPP_API_KEY", "SCRUPP_KEY"),
+    )
+    # Some Scrupp Apollo flows require a linked Apollo account id/slug from the Scrupp dashboard.
+    SCRUPP_APOLLO_ACCOUNT: str = Field(
+        default="",
+        validation_alias=AliasChoices("SCRUPP_APOLLO_ACCOUNT", "SCRUPP_ACCOUNT"),
+    )
+    # Clay REST API (https://api.clay.com) — reserved for enrichments / future use.
+    CLAY_API_KEY: str = Field(
+        default="",
+        validation_alias=AliasChoices("CLAY_API_KEY", "CLAY_KEY"),
+    )
 
     # Database
     DATABASE_URL: str = Field(
@@ -42,11 +74,23 @@ class Settings(BaseSettings):
     # Model selection (adjustable per deploy)
     CLAUDE_REASONING_MODEL: str = Field(default="claude-sonnet-4-5")
     CLAUDE_FAST_MODEL: str = Field(default="claude-haiku-4-5")
+    # Used for openai | groq | openrouter (vendor-specific model ids, e.g. llama-3.3-70b-versatile)
     OPENAI_REASONING_MODEL: str = Field(default="gpt-4o")
     OPENAI_FAST_MODEL: str = Field(default="gpt-4o-mini")
 
-    # Provider choice: "openai" or "anthropic"
-    LLM_PROVIDER: str = Field(default="openai")
+    # openai | anthropic | groq | openrouter
+    LLM_PROVIDER: str = Field(default="groq")
+
+    GROQ_BASE_URL: str = Field(default="https://api.groq.com/openai/v1")
+    OPENROUTER_BASE_URL: str = Field(default="https://openrouter.ai/api/v1")
+    OPENROUTER_HTTP_REFERER: str = Field(
+        default="http://localhost:5173",
+        description="Optional attribution header for OpenRouter.",
+    )
+    OPENROUTER_APP_TITLE: str = Field(
+        default="NexusAI",
+        description="Optional X-Title header for OpenRouter.",
+    )
 
     # Dev flag: skip JWT auth and use a default dev user (ONLY for local testing)
     DISABLE_AUTH: bool = Field(default=False)
@@ -72,6 +116,10 @@ class Settings(BaseSettings):
             missing.append("OPENAI_API_KEY")
         if self.LLM_PROVIDER == "anthropic" and not self.ANTHROPIC_API_KEY:
             missing.append("ANTHROPIC_API_KEY")
+        if self.LLM_PROVIDER == "groq" and not (self.GROQ_API_KEY or "").strip():
+            missing.append("GROQ_API_KEY")
+        if self.LLM_PROVIDER == "openrouter" and not (self.OPENROUTER_API_KEY or "").strip():
+            missing.append("OPENROUTER_API_KEY")
         if not self.TAVILY_API_KEY:
             missing.append("TAVILY_API_KEY")
         if missing:

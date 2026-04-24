@@ -1,5 +1,11 @@
 import { create } from 'zustand'
 import { api, apiErrorMessage } from '@/api/client'
+import {
+  CHAT_MODEL_PROFILES,
+  initialChatModelId,
+  writeStoredChatModelId,
+  type ChatLlmProvider,
+} from '@/config/chatModels'
 import type {
   Lead,
   LeadsByStatus,
@@ -24,6 +30,18 @@ interface SearchState {
   lastError: string | null
   /** Total wall time for the last finished search (from SSE `meta`). */
   lastSearchElapsedMs: number | null
+
+  /** UI-selected model preset for the next search stream (cleared after SSE URL is built). */
+  streamLlmParams: {
+    provider: ChatLlmProvider
+    reasoningModel: string
+    fastModel: string
+  } | null
+  selectedChatModelId: string
+  setSelectedChatModelId: (id: string) => void
+  setStreamLlmParams: (
+    v: { provider: ChatLlmProvider; reasoningModel: string; fastModel: string } | null,
+  ) => void
 
   setQuery: (q: string) => void
   startSearch: (query: string) => Promise<string | null>
@@ -67,6 +85,15 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   lastError: null,
   lastSearchElapsedMs: null,
 
+  streamLlmParams: null,
+  selectedChatModelId: initialChatModelId(),
+
+  setSelectedChatModelId: (id) => {
+    writeStoredChatModelId(id)
+    set({ selectedChatModelId: id })
+  },
+  setStreamLlmParams: (v) => set({ streamLlmParams: v }),
+
   setQuery: (q) => set({ query: q }),
 
   startSearch: async (query) => {
@@ -84,7 +111,16 @@ export const useSearchStore = create<SearchState>((set, get) => ({
     })
     try {
       const { data } = await api.post<StartSearchResponse>('/search', { query })
-      set({ activeSessionId: data.session_id })
+      const prof =
+        CHAT_MODEL_PROFILES.find((p) => p.id === get().selectedChatModelId) ?? CHAT_MODEL_PROFILES[0]
+      set({
+        activeSessionId: data.session_id,
+        streamLlmParams: {
+          provider: prof.provider,
+          reasoningModel: prof.reasoningModel,
+          fastModel: prof.fastModel,
+        },
+      })
       void get().loadSessions()
       return data.session_id
     } catch (err) {
@@ -171,6 +207,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
       query: '',
       lastError: null,
       lastSearchElapsedMs: null,
+      streamLlmParams: null,
     }),
 
   selectLead: (id) =>

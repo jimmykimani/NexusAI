@@ -1,6 +1,8 @@
 """Compile the NexusAI LangGraph pipeline."""
 from __future__ import annotations
 
+import app.langchain_compat  # noqa: F401 — before langgraph touches langchain_core globals
+
 from langgraph.graph import END, StateGraph
 
 from app.agents.ranking_agent import ranking_node

@@ -59,8 +59,12 @@ export function apiErrorMessage(err: unknown): string {
   return 'Unknown error'
 }
 
-export async function buildSseUrl(sessionId: string): Promise<string> {
+export async function buildSseUrl(sessionId: string, llmQuerySuffix?: string): Promise<string> {
   const token = (await getAuthToken()) ?? ''
   const root = baseURL || ''
-  return `${root}/api/v1/search/${sessionId}/stream?token=${encodeURIComponent(token)}`
+  let url = `${root}/api/v1/search/${sessionId}/stream?token=${encodeURIComponent(token)}`
+  if (llmQuerySuffix) {
+    url += llmQuerySuffix.startsWith('&') ? llmQuerySuffix : `&${llmQuerySuffix}`
+  }
+  return url
 }
