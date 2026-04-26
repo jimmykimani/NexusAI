@@ -15,13 +15,13 @@ export function useSearch() {
   const submit = useCallback(
     async (override?: string) => {
       const q = (override ?? query).trim()
-      if (q.length < 3) {
-        showToast('error', 'Please enter at least 3 characters.')
+      if (!q.length) {
+        showToast('error', 'Please enter a message first.')
         return null
       }
       const sessionId = await startSearch(q)
       if (!sessionId) {
-        showToast('error', 'Search could not be started. Check your connection.')
+        showToast('error', 'Message could not be sent. Check your connection.')
       } else {
         // Reset the textbox so the next question starts blank.
         setQuery('')

@@ -21,7 +21,7 @@ export function SearchInput({
   onChange,
   onSubmit,
   disabled,
-  placeholder = "Describe who you're looking for…",
+  placeholder = "Ask who to find, refine a result set, or just chat with NexusAI…",
   compact,
   glowing,
 }: Props) {
@@ -33,6 +33,14 @@ export function SearchInput({
     el.style.height = '0px'
     el.style.height = Math.min(el.scrollHeight, 160) + 'px'
   }, [value])
+
+  useEffect(() => {
+    function handleFocusSearch() {
+      ref.current?.focus()
+    }
+    window.addEventListener('nexusai:focus-search', handleFocusSearch)
+    return () => window.removeEventListener('nexusai:focus-search', handleFocusSearch)
+  }, [])
 
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {

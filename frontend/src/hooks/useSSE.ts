@@ -14,6 +14,7 @@ export function useSSE(sessionId: string | null): void {
   const refreshLeads = useSearchStore((s) => s.refreshLeadsFromServer)
   const setSearching = useSearchStore((s) => s.setSearching)
   const loadSessions = useSearchStore((s) => s.loadSessions)
+  const patchThreadTurnStatus = useSearchStore((s) => s.patchThreadTurnStatus)
   const showToast = useUIStore((s) => s.showToast)
 
   const esRef = useRef<EventSource | null>(null)
@@ -26,12 +27,18 @@ export function useSSE(sessionId: string | null): void {
 
     async function connect() {
       const llm = useSearchStore.getState().streamLlmParams
+      const pipelineMode = useUIStore.getState().pipelineMode
       let llmSuffix = ''
       if (llm) {
         const p = new URLSearchParams()
         p.set('llm_provider', llm.provider)
         p.set('llm_reasoning_model', llm.reasoningModel)
         p.set('llm_fast_model', llm.fastModel)
+        p.set('pipeline_mode', pipelineMode)
+        llmSuffix = `&${p.toString()}`
+      } else {
+        const p = new URLSearchParams()
+        p.set('pipeline_mode', pipelineMode)
         llmSuffix = `&${p.toString()}`
       }
       const url = await buildSseUrl(sessionId!, llmSuffix)
@@ -51,6 +58,7 @@ export function useSSE(sessionId: string | null): void {
 
         if (event.type === 'stream_end') {
           setSearching(false)
+          if (sessionId) patchThreadTurnStatus(sessionId, 'complete')
           es?.close()
           void loadSessions()
           if (sessionId) void refreshLeads(sessionId)
@@ -63,14 +71,16 @@ export function useSSE(sessionId: string | null): void {
           addStreamEvent(event)
         }
 
-        if (event.type === 'complete' && event.data?.leads) {
-          setLeads(event.data.leads)
+        if (event.type === 'complete') {
+          if (event.data?.leads) setLeads(event.data.leads)
           setSearching(false)
+          if (sessionId) patchThreadTurnStatus(sessionId, 'complete')
           void loadSessions()
         }
 
         if (event.type === 'error') {
           setSearching(false)
+          if (sessionId) patchThreadTurnStatus(sessionId, 'error')
           es?.close()
           void loadSessions()
           showToast('error', event.message)
@@ -92,5 +102,14 @@ export function useSSE(sessionId: string | null): void {
       es?.close()
       esRef.current = null
     }
-  }, [sessionId, addStreamEvent, setLeads, refreshLeads, setSearching, loadSessions, showToast])
+  }, [
+    sessionId,
+    addStreamEvent,
+    setLeads,
+    refreshLeads,
+    setSearching,
+    loadSessions,
+    patchThreadTurnStatus,
+    showToast,
+  ])
 }

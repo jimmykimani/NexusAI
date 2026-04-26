@@ -77,7 +77,7 @@ export function HeroSearch() {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
             disabled={isSearching}
-            placeholder="Describe who you're looking for — role, company, location, signals…"
+            placeholder="Describe who you're looking for, or ask NexusAI for help shaping the search…"
             rows={3}
             className="w-full resize-none bg-transparent px-5 pt-4 pb-2
                        border-0 focus:outline-none focus:ring-0
@@ -85,7 +85,7 @@ export function HeroSearch() {
           />
           <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-3">
             <span className="text-xs text-nexus-muted px-1 order-2 sm:order-1 flex-1 min-w-[8rem]">
-              {isSearching ? 'Running agents…' : 'Enter to search · Shift+Enter for newline'}
+              {isSearching ? 'Running agents…' : 'Enter to send · Shift+Enter for newline'}
             </span>
             <div className="flex items-center gap-2 order-1 sm:order-2 ml-auto sm:ml-0">
               <ChatModelPicker disabled={isSearching} />
@@ -95,17 +95,17 @@ export function HeroSearch() {
                 disabled={isSearching || !query.trim()}
                 className="btn-primary py-2 px-5"
               >
-              {isSearching ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Searching
-                </>
-              ) : (
-                <>
-                  Find
-                  <ArrowUp className="w-4 h-4" />
-                </>
-              )}
+                {isSearching ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Searching
+                  </>
+                ) : (
+                  <>
+                    Find
+                    <ArrowUp className="w-4 h-4" />
+                  </>
+                )}
               </button>
             </div>
           </div>

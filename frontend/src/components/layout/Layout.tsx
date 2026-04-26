@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Sidebar } from './Sidebar'
 import { PanelResizer } from './PanelResizer'
 import { ChatPanel } from '@/components/chat/ChatPanel'
@@ -21,17 +21,41 @@ import { useUIStore } from '@/stores/uiStore'
  */
 export function Layout() {
   const activeSessionId = useSearchStore((s) => s.activeSessionId)
+  const activeThreadTurns = useSearchStore((s) => s.activeThreadTurns)
+  const sessions = useSearchStore((s) => s.sessions)
   const isSearching = useSearchStore((s) => s.isSearching)
   const eventCount = useSearchStore((s) => s.streamEvents.length)
   const leadCount = useSearchStore((s) => s.leads.length)
   const auxView = useUIStore((s) => s.auxView)
+  const setAuxView = useUIStore((s) => s.setAuxView)
+  const openSettings = useUIStore((s) => s.openSettings)
 
   useSSE(isSearching ? activeSessionId : null)
 
-  const inSearch = useMemo(
-    () => Boolean(activeSessionId) || isSearching || eventCount > 0 || leadCount > 0,
-    [activeSessionId, isSearching, eventCount, leadCount],
+  const currentTurn = useMemo(
+    () => activeThreadTurns.find((turn) => turn.session_id === activeSessionId) ?? activeThreadTurns.at(-1) ?? null,
+    [activeSessionId, activeThreadTurns],
   )
+  const activeSession = useMemo(
+    () => sessions.find((session) => session.id === activeSessionId) ?? null,
+    [activeSessionId, sessions],
+  )
+  const hasThreadContext = Boolean(activeSessionId) || activeThreadTurns.length > 0
+  const searchLikeTurn = currentTurn?.status && currentTurn.status !== 'chat'
+  const searchLikeSession = activeSession?.status && activeSession.status !== 'chat'
+  const showSearchWorkspace = useMemo(() => {
+    const hasRankedData = leadCount > 0
+    const hasSearchEvents = eventCount > 0
+    const searchInFlight = isSearching && Boolean(searchLikeTurn || searchLikeSession || hasSearchEvents)
+    return hasRankedData || hasSearchEvents || searchInFlight
+  }, [eventCount, isSearching, leadCount, searchLikeSession, searchLikeTurn])
+
+  useEffect(() => {
+    if (auxView === 'system' || auxView === 'logs') {
+      setAuxView('chat')
+      openSettings('system')
+    }
+  }, [auxView, openSettings, setAuxView])
 
   return (
     <div className="flex h-screen bg-nexus-bg text-nexus-text overflow-hidden">
@@ -42,7 +66,9 @@ export function Layout() {
       {auxView === 'mylist' && <MyListView />}
 
       {auxView === 'chat' && (
-        inSearch ? (
+        !hasThreadContext ? (
+          <HeroSearch />
+        ) : showSearchWorkspace ? (
           <div className="flex flex-1 min-h-0 min-w-0">
             <ChatPanel />
             <PanelResizer />
@@ -50,7 +76,9 @@ export function Layout() {
             <SessionChip />
           </div>
         ) : (
-          <HeroSearch />
+          <div className="flex flex-1 min-h-0 min-w-0">
+            <ChatPanel standalone />
+          </div>
         )
       )}
 

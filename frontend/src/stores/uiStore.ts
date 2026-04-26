@@ -1,6 +1,9 @@
 import { create } from 'zustand'
 
-export type AuxView = 'chat' | 'process' | 'emails' | 'mylist'
+export type AuxView = 'chat' | 'process' | 'emails' | 'mylist' | 'system' | 'logs'
+export type SettingsTab = 'profile' | 'usage' | 'workspace' | 'email' | 'help' | 'system'
+export type ResultsGrouping = 'grouped' | 'flat'
+export type PipelineMode = 'nexus' | 'basic'
 
 const CHAT_WIDTH_KEY = 'nexusai-chat-width'
 const DEFAULT_CHAT_WIDTH = 400
@@ -22,6 +25,10 @@ interface UIState {
   auxView: AuxView
   profileLeadId: string | null
   chatWidth: number
+  settingsOpen: boolean
+  settingsTab: SettingsTab
+  resultsGrouping: ResultsGrouping
+  pipelineMode: PipelineMode
 
   toggleSidebar: () => void
   openOutreach: () => void
@@ -32,6 +39,11 @@ interface UIState {
   openProfile: (leadId: string) => void
   closeProfile: () => void
   setChatWidth: (w: number) => void
+  openSettings: (tab?: SettingsTab) => void
+  closeSettings: () => void
+  setSettingsTab: (tab: SettingsTab) => void
+  toggleResultsGrouping: () => void
+  setPipelineMode: (mode: PipelineMode) => void
 }
 
 export const CHAT_WIDTH_BOUNDS = { min: MIN_CHAT_WIDTH, max: MAX_CHAT_WIDTH }
@@ -43,6 +55,10 @@ export const useUIStore = create<UIState>((set) => ({
   auxView: 'chat',
   profileLeadId: null,
   chatWidth: loadChatWidth(),
+  settingsOpen: false,
+  settingsTab: 'usage',
+  resultsGrouping: 'grouped',
+  pipelineMode: 'nexus',
 
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   openOutreach: () => set({ outreachModalOpen: true }),
@@ -67,4 +83,12 @@ export const useUIStore = create<UIState>((set) => ({
     }
     set({ chatWidth: clamped })
   },
+  openSettings: (tab) => set({ settingsOpen: true, settingsTab: tab ?? 'usage' }),
+  closeSettings: () => set({ settingsOpen: false }),
+  setSettingsTab: (tab) => set({ settingsTab: tab }),
+  toggleResultsGrouping: () =>
+    set((state) => ({
+      resultsGrouping: state.resultsGrouping === 'grouped' ? 'flat' : 'grouped',
+    })),
+  setPipelineMode: (mode) => set({ pipelineMode: mode }),
 }))

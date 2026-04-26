@@ -49,6 +49,27 @@
     --nexus-cta-fg: 8 8 9;
   }
 
+  /**
+   * Signed-out marketing page: always use light semantic tokens so the landing
+   * stays bright even when the app shell uses dark mode (vars inherit from html).
+   */
+  .marketing-landing {
+    --nexus-bg: 252 252 250;
+    --nexus-surface: 255 255 255;
+    --nexus-card: 255 255 255;
+    --nexus-elevated: 244 244 245;
+    --nexus-border: 228 228 231;
+    --nexus-muted: 100 116 139;
+    --nexus-subtle: 71 85 105;
+    --nexus-text: 15 23 42;
+    --nexus-accent: 22 101 52;
+    --nexus-hot: 190 24 93;
+    --nexus-overlay: 15 23 42;
+    --nexus-overlay-strong: 15 23 42;
+    --nexus-cta-bg: 15 23 42;
+    --nexus-cta-fg: 255 255 255;
+  }
+
   html,
   body,
   #root {
@@ -166,5 +187,71 @@
   /* Italic serif accent — used on hero headings */
   .serif-italic {
     @apply font-display italic font-normal;
+  }
+}
+
+@layer utilities {
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes huntPulse {
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 0.9;
+    }
+    50% {
+      transform: scale(1.15);
+      opacity: 1;
+    }
+  }
+
+  @keyframes huntRing {
+    0% {
+      transform: scale(0.85);
+      opacity: 0.8;
+    }
+    100% {
+      transform: scale(1.45);
+      opacity: 0;
+    }
+  }
+
+  @keyframes huntTravel {
+    0% {
+      transform: translateX(-110%);
+      opacity: 0;
+    }
+    40% {
+      opacity: 1;
+    }
+    100% {
+      transform: translateX(220%);
+      opacity: 0;
+    }
+  }
+
+  .animate-slide-in {
+    animation: slideIn 0.3s ease both;
+  }
+
+  .animate-hunt-pulse {
+    animation: huntPulse 1.4s ease-in-out infinite;
+  }
+
+  .animate-hunt-ring {
+    animation: huntRing 1.6s ease-out infinite;
+  }
+
+  .animate-hunt-travel {
+    animation: huntTravel 1.4s linear infinite;
   }
 }

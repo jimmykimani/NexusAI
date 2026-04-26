@@ -18,6 +18,10 @@ export function AgentConversation() {
     () => partitionStreamEvents(events),
     [events],
   )
+  const compactLiveTechnical = useMemo(
+    () => compactTechnicalEvents(technical),
+    [technical],
+  )
 
   const timingLabel =
     elapsedMs != null && elapsedMs >= 0
@@ -43,7 +47,7 @@ export function AgentConversation() {
 
       {!hasComplete ? (
         <div className="space-y-3">
-          {technical.map((event, i) => (
+          {compactLiveTechnical.map((event, i) => (
             <ChatMessage key={i} event={event} />
           ))}
         </div>
@@ -124,4 +128,20 @@ function partitionStreamEvents(events: StreamEvent[]) {
     technical,
     hasComplete,
   }
+}
+
+/**
+ * Keep live search updates minimal while running.
+ * Full event history remains available in the "Background steps" disclosure once complete.
+ */
+function compactTechnicalEvents(events: StreamEvent[]) {
+  if (events.length === 0) return events
+  const order: StreamEvent['type'][] = ['plan', 'searching', 'found', 'ranking', 'error', 'complete']
+  const latestByType = new Map<StreamEvent['type'], StreamEvent>()
+  for (const event of events) {
+    if (order.includes(event.type)) latestByType.set(event.type, event)
+  }
+  return order
+    .map((type) => latestByType.get(type))
+    .filter((event): event is StreamEvent => Boolean(event))
 }

@@ -15,6 +15,7 @@ export function EmailPreview({ email, onChange, onSend, sending }: Props) {
       <div className="flex items-baseline justify-between gap-3">
         <div className="text-xs text-nexus-muted">
           To: <span className="text-nexus-text">{email.to_name || 'Lead'}</span>
+          {email.to_email ? <span className="ml-1 text-nexus-subtle">· {email.to_email}</span> : null}
         </div>
         <button
           type="button"

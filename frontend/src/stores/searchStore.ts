@@ -7,6 +7,8 @@ import {
   type ChatLlmProvider,
 } from '@/config/chatModels'
 import type {
+  ConversationTurn,
+  FeedbackRating,
   Lead,
   LeadsByStatus,
   SearchSession,
@@ -14,9 +16,85 @@ import type {
   StreamEvent,
 } from '@/types'
 
+const LEAD_FEEDBACK_KEY = 'nexusai-lead-feedback'
+const SESSION_FEEDBACK_KEY = 'nexusai-session-feedback'
+const SESSION_TIMINGS_KEY = 'nexusai-session-timings'
+
+function readFeedbackMap(storageKey: string): Record<string, FeedbackRating> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, FeedbackRating>
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeFeedbackMap(storageKey: string, value: Record<string, FeedbackRating>): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(value))
+  } catch {
+    // ignore quota / private mode errors
+  }
+}
+
+function readTimingMap(): Record<string, number> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = window.localStorage.getItem(SESSION_TIMINGS_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, number>
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeTimingMap(value: Record<string, number>): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(SESSION_TIMINGS_KEY, JSON.stringify(value))
+  } catch {
+    // ignore
+  }
+}
+
+function replaceOrAddTurn(turns: ConversationTurn[], next: ConversationTurn): ConversationTurn[] {
+  const rest = turns.filter((t) => t.session_id !== next.session_id)
+  return [...rest, next]
+}
+
+function newTurnId(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `turn-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+function buildTurn(sessionId: string, userMessage: string, status: ConversationTurn['status']): ConversationTurn {
+  const now = new Date().toISOString()
+  return {
+    id: newTurnId(),
+    thread_id: sessionId,
+    session_id: sessionId,
+    user_message: userMessage,
+    assistant_summary: null,
+    status,
+    result_lead_count: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    total_tokens: 0,
+    created_at: now,
+    updated_at: now,
+  }
+}
+
 interface SearchState {
   sessions: SearchSession[]
   activeSessionId: string | null
+  activeThreadTurns: ConversationTurn[]
 
   query: string
   isSearching: boolean
@@ -27,11 +105,12 @@ interface SearchState {
   partiallyMatched: Lead[]
 
   selectedLeadIds: Set<string>
+  leadFeedback: Record<string, FeedbackRating>
+  sessionFeedback: Record<string, FeedbackRating>
+  sessionTimings: Record<string, number>
   lastError: string | null
-  /** Total wall time for the last finished search (from SSE `meta`). */
   lastSearchElapsedMs: number | null
 
-  /** UI-selected model preset for the next search stream (cleared after SSE URL is built). */
   streamLlmParams: {
     provider: ChatLlmProvider
     reasoningModel: string
@@ -55,11 +134,15 @@ interface SearchState {
   refreshLeadsFromServer: (sessionId: string) => Promise<void>
   setSearching: (v: boolean) => void
   resetCurrent: () => void
+  patchThreadTurnStatus: (sessionId: string, status: ConversationTurn['status']) => void
 
   selectLead: (id: string) => void
   deselectLead: (id: string) => void
   toggleLead: (id: string) => void
   clearSelection: () => void
+  submitLeadFeedback: (leadId: string, rating: FeedbackRating) => Promise<void>
+  submitSessionFeedback: (sessionId: string, rating: FeedbackRating) => Promise<void>
+  findMore: () => Promise<string | null>
 }
 
 function partitionLeads(leads: Lead[]): { fully: Lead[]; partial: Lead[] } {
@@ -75,6 +158,7 @@ function partitionLeads(leads: Lead[]): { fully: Lead[]; partial: Lead[] } {
 export const useSearchStore = create<SearchState>((set, get) => ({
   sessions: [],
   activeSessionId: null,
+  activeThreadTurns: [],
   query: '',
   isSearching: false,
   streamEvents: [],
@@ -82,6 +166,9 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   fullyMatched: [],
   partiallyMatched: [],
   selectedLeadIds: new Set(),
+  leadFeedback: readFeedbackMap(LEAD_FEEDBACK_KEY),
+  sessionFeedback: readFeedbackMap(SESSION_FEEDBACK_KEY),
+  sessionTimings: readTimingMap(),
   lastError: null,
   lastSearchElapsedMs: null,
 
@@ -95,6 +182,13 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   setStreamLlmParams: (v) => set({ streamLlmParams: v }),
 
   setQuery: (q) => set({ query: q }),
+
+  patchThreadTurnStatus: (sessionId, status) =>
+    set((state) => ({
+      activeThreadTurns: state.activeThreadTurns.map((t) =>
+        t.session_id === sessionId ? { ...t, status, updated_at: new Date().toISOString() } : t,
+      ),
+    })),
 
   startSearch: async (query) => {
     if (!query.trim()) return null
@@ -113,14 +207,16 @@ export const useSearchStore = create<SearchState>((set, get) => ({
       const { data } = await api.post<StartSearchResponse>('/search', { query })
       const prof =
         CHAT_MODEL_PROFILES.find((p) => p.id === get().selectedChatModelId) ?? CHAT_MODEL_PROFILES[0]
-      set({
+      const turn = buildTurn(data.session_id, query.trim(), 'searching')
+      set((state) => ({
         activeSessionId: data.session_id,
         streamLlmParams: {
           provider: prof.provider,
           reasoningModel: prof.reasoningModel,
           fastModel: prof.fastModel,
         },
-      })
+        activeThreadTurns: replaceOrAddTurn(state.activeThreadTurns, turn),
+      }))
       void get().loadSessions()
       return data.session_id
     } catch (err) {
@@ -140,7 +236,36 @@ export const useSearchStore = create<SearchState>((set, get) => ({
 
   loadSession: async (sessionId) => {
     try {
-      set({ activeSessionId: sessionId, streamEvents: [], leads: [] })
+      let sess = get().sessions.find((s) => s.id === sessionId)
+      if (!sess) {
+        await get().loadSessions()
+        sess = get().sessions.find((s) => s.id === sessionId)
+      }
+      const hydratedTurn: ConversationTurn | null = sess
+        ? {
+            id: `hydrated-${sessionId}`,
+            thread_id: sess.thread_id ?? sessionId,
+            session_id: sessionId,
+            user_message: sess.original_query,
+            assistant_summary: null,
+            status: sess.status,
+            result_lead_count: sess.lead_count,
+            input_tokens: sess.input_tokens ?? 0,
+            output_tokens: sess.output_tokens ?? 0,
+            total_tokens: sess.total_tokens ?? 0,
+            created_at: sess.created_at,
+            updated_at: sess.created_at,
+          }
+        : null
+      set((state) => ({
+        activeSessionId: sessionId,
+        streamEvents: [],
+        leads: [],
+        selectedLeadIds: new Set(),
+        activeThreadTurns: hydratedTurn
+          ? replaceOrAddTurn(state.activeThreadTurns, hydratedTurn)
+          : state.activeThreadTurns,
+      }))
       const { data } = await api.get<LeadsByStatus>('/leads', { params: { session_id: sessionId } })
       const all = [...data.fully_matched, ...data.partially_matched]
       set({
@@ -157,15 +282,22 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   setActiveSession: (id) => set({ activeSessionId: id }),
 
   addStreamEvent: (event) =>
-    set((state) => ({ streamEvents: [...state.streamEvents, event] })),
+    set((state) => ({
+      streamEvents: [...state.streamEvents, { ...event, client_received_at: Date.now() }],
+    })),
 
-  setSearchTiming: (elapsedMs) => set({ lastSearchElapsedMs: elapsedMs }),
+  setSearchTiming: (elapsedMs) =>
+    set((state) => {
+      const activeSessionId = state.activeSessionId
+      if (!activeSessionId || elapsedMs == null) {
+        return { lastSearchElapsedMs: elapsedMs }
+      }
+      const nextTimings = { ...state.sessionTimings, [activeSessionId]: elapsedMs }
+      writeTimingMap(nextTimings)
+      return { lastSearchElapsedMs: elapsedMs, sessionTimings: nextTimings }
+    }),
 
   setLeads: (leads) => {
-    // Streamed leads from the agent pipeline arrive WITHOUT ids because the
-    // backend only assigns UUIDs at DB persist time (after the stream closes).
-    // We mint ephemeral client-side ids so rows are clickable immediately; the
-    // next `/leads` refresh replaces them with canonical server ids.
     const withIds: Lead[] = leads.map((l) => {
       if (l.id) return l
       const ephemeral = (
@@ -203,6 +335,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
       fullyMatched: [],
       partiallyMatched: [],
       selectedLeadIds: new Set(),
+      activeThreadTurns: [],
       activeSessionId: null,
       query: '',
       lastError: null,
@@ -230,4 +363,42 @@ export const useSearchStore = create<SearchState>((set, get) => ({
       return { selectedLeadIds: next }
     }),
   clearSelection: () => set({ selectedLeadIds: new Set() }),
+
+  submitLeadFeedback: async (leadId, rating) => {
+    try {
+      await api.post(`/leads/${leadId}/feedback`, { rating })
+    } catch {
+      // optimistic UX when backend has no feedback route
+    } finally {
+      set((state) => {
+        const next = { ...state.leadFeedback, [leadId]: rating }
+        writeFeedbackMap(LEAD_FEEDBACK_KEY, next)
+        return { leadFeedback: next }
+      })
+    }
+  },
+
+  submitSessionFeedback: async (sessionId, rating) => {
+    try {
+      await api.post(`/search/${sessionId}/feedback`, { rating })
+    } catch {
+      // optimistic UX
+    } finally {
+      set((state) => {
+        const next = { ...state.sessionFeedback, [sessionId]: rating }
+        writeFeedbackMap(SESSION_FEEDBACK_KEY, next)
+        return { sessionFeedback: next }
+      })
+    }
+  },
+
+  findMore: async () => {
+    const activeSessionId = get().activeSessionId
+    const session = get().sessions.find((entry) => entry.id === activeSessionId)
+    if (!session) {
+      set({ lastError: 'Open a search session before asking for more results.' })
+      return null
+    }
+    return get().startSearch(session.original_query)
+  },
 }))
