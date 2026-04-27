@@ -6,7 +6,10 @@ import axios, { AxiosError } from 'axios'
  * wrong interface (or nothing) — force proxy by returning ''.
  */
 function resolveApiBaseUrl(): string {
-  const raw = (import.meta.env.VITE_API_URL as string | undefined)?.trim() ?? ''
+  const raw = (
+    (import.meta.env.VITE_API_BASE_URL as string | undefined) ||
+    (import.meta.env.VITE_API_URL as string | undefined)
+  )?.trim() ?? ''
   if (!raw) return ''
   if (!import.meta.env.DEV) return raw
   try {
