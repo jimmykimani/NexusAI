@@ -103,8 +103,8 @@ graph LR
     
     subgraph LangGraph [Agentic Workflow]
         Supervisor -->|Parallel| Search[Search Agents]
-        Search --> Deterministic Rank_Scorer
-        Deterministic Rank_Scorer --> Evaluator
+        Search --> RankScorer[Deterministic Rank Scorer]
+        RankScorer --> Evaluator[Result Evaluator]
     end
     
     Search -.-> |Semantic Hits| Chroma[(ChromaDB)]
