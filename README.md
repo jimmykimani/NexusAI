@@ -102,21 +102,13 @@ graph LR
     API -- Route Task --> LangGraph
     
     subgraph LangGraph [Agentic Workflow]
-        Supervisor -->|Parallel| Search[Search Agents]
-        Search --> RankScorer[Deterministic Rank Scorer]
-        RankScorer --> Evaluator[Result Evaluator]
+        Supervisor --> Search[Search]
+        Search --> Scorer[Scorer]
+        Scorer --> Evaluator[Evaluator]
     end
     
-    Search -.-> |Semantic Hits| Chroma[(ChromaDB)]
-    LangGraph -- Free / Fast --> Groq[Groq Llama 3]
-    API -- Paid / Quality --> Claude[Claude 3.5 Sonnet]
-    
-    %% Colors
-    style Browser fill:#2563eb,stroke:#fff,color:#fff
-    style LangGraph fill:#312e81,stroke:#6366f1,color:#fff
-    style Groq fill:#d97706,stroke:#fff,color:#fff
-    style Claude fill:#059669,stroke:#fff,color:#fff
-    style PG fill:#0f766e,stroke:#fff,color:#fff
+    Search -.-> Chroma[(ChromaDB)]
+    LangGraph -- LLMs --> Models[Groq / Claude]
 ```
 
 ---
