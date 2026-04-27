@@ -11,7 +11,6 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: nexusai-backend
-  PYTHONPATH: ${{ github.workspace }}/backend
 
 jobs:
   # ── Job 1: Lint & Test ───────────────────────────────────────────
@@ -62,7 +61,7 @@ jobs:
           LLM_PROVIDER: groq
         run: |
           cd backend
-          pytest tests/ -v --cov=app --cov-report=xml --cov-fail-under=40
+          PYTHONPATH=. pytest tests/ -v --cov=app --cov-report=xml --cov-fail-under=40
 
       - name: Upload coverage
         if: always()
@@ -96,7 +95,7 @@ jobs:
           LLM_PROVIDER: groq
         run: |
           cd backend
-          python -m pytest tests/eval/ -v --tb=short || true
+          PYTHONPATH=. python -m pytest tests/eval/ -v --tb=short || true
         # Non-blocking for now — eval infrastructure evolving
 
   # ── Job 3: Build & Push to ECR ──────────────────────────────────
