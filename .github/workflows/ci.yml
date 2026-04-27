@@ -4,9 +4,9 @@ name: NexusAI CI/CD
 
 on:
   push:
-    branches: [main, staging]
+    branches: [master, main]
   pull_request:
-    branches: [main]
+    branches: [master, main]
 
 env:
   AWS_REGION: us-east-1
