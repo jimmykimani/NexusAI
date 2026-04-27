@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { Sidebar } from './Sidebar'
 import { PanelResizer } from './PanelResizer'
 import { ChatPanel } from '@/components/chat/ChatPanel'
@@ -29,8 +29,6 @@ export function Layout() {
   const eventCount = useSearchStore((s) => s.streamEvents.length)
   const leadCount = useSearchStore((s) => s.leads.length)
   const auxView = useUIStore((s) => s.auxView)
-  const setAuxView = useUIStore((s) => s.setAuxView)
-  const openSettings = useUIStore((s) => s.openSettings)
 
   const sseSessionId =
     isSearching && activeSessionId && !activeSessionId.startsWith('local-')

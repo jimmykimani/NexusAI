@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { ChatMessage } from './ChatMessage'
-import { useSearchStore } from '@/stores/searchStore'
 import type { StreamEvent } from '@/types'
 import { cn } from '@/lib/cn'
 
@@ -101,7 +100,6 @@ function partitionStreamEvents(events: StreamEvent[]) {
 
   const introChunks: string[] = []
   const outroChunks: string[] = []
-  let seenComplete = false
 
   for (const e of events) {
     if (e.type === 'complete') {

@@ -291,6 +291,9 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   sessionTimings: readTimingMap(),
   lastError: null,
   lastSearchElapsedMs: null,
+  activeResultQuery: null,
+  setActiveResultQuery: (q) => set({ activeResultQuery: q }),
+  pendingQuery: null,
   sseStreamEpoch: 0,
 
   streamLlmParams: null,
