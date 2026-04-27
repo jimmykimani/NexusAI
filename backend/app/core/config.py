@@ -79,7 +79,12 @@ class Settings(BaseSettings):
 
     # App
     ENVIRONMENT: str = Field(default="development")
-    CORS_ORIGINS: List[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    CORS_ORIGINS: List[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "https://master.d2ueqn9r8b4xre.amplifyapp.com",
+        ]
+    )
 
     # Model selection (adjustable per deploy)
     CLAUDE_REASONING_MODEL: str = Field(default="claude-sonnet-4-5")
