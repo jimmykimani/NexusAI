@@ -6,12 +6,14 @@ import axios, { AxiosError } from 'axios'
  * wrong interface (or nothing) — force proxy by returning ''.
  */
 function resolveApiBaseUrl(): string {
+  // Use the ALB URL as a hardcoded fallback for the production demo
+  const fallback = 'http://nexusai-alb-398865142.us-east-1.elb.amazonaws.com'
   const raw = (
     (import.meta.env.VITE_API_BASE_URL as string | undefined) ||
     (import.meta.env.VITE_API_URL as string | undefined)
   )?.trim() ?? ''
-  if (!raw) return ''
-  if (!import.meta.env.DEV) return raw
+  
+  if (!import.meta.env.DEV) return raw || fallback
   try {
     const u = new URL(raw)
     const h = u.hostname.toLowerCase()
