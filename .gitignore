@@ -43,3 +43,6 @@ postgres_data/
 # Logs
 *.log
 logs/
+terraform/*.tfvars
+terraform/.terraform*
+terraform/*.tfstate*
