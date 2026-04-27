@@ -21,6 +21,65 @@
 
 ---
 
+## 🎯 Problem Statement & Strategy
+
+### The Problem
+Finding the right person for a job, partnership, or business opportunity is broken. It requires manually searching LinkedIn with rigid filters, cross-referencing company websites, hunting for contact information across multiple platforms, and writing cold outreach emails from scratch — for every single lead.
+
+This process takes hours per search, produces inconsistent results, and scales poorly. A recruiter searching for *"senior ML engineers in Nairobi with fintech startup experience"* must manually decompose that intent into keyword filters, browse profiles one by one, assess fit subjectively, and write a fresh email for each person they want to contact.
+
+### Why This Is an AI Problem
+This is not a simple database lookup problem. It requires:
+1.  **Natural Language Understanding**: Interpreting "fintech startup experience" means the system must understand signals like "Series A company", "payments", "mobile money", not just the literal string "fintech startup".
+2.  **Multi-source Reasoning**: A professional identity is distributed across LinkedIn, GitHub, personal websites, and news articles. No single structured database holds all of it.
+3.  **Semantic Matching**: Assessing fit requires understanding meaning (e.g., "ML Engineer" vs "Machine Learning Researcher").
+4.  **Personalized Generation**: Writing outreach that references specific context cannot be templated; it requires grounded, novel generation.
+
+### The Solution: NexusAI
+NexusAI is an AI-powered people search and personalized outreach platform. Users describe who they are looking for in plain English, and the system:
+*   Decomposes queries into structured criteria.
+*   Searches multiple sources in parallel (Web, GitHub, Apollo).
+*   Extracts/Normalizes data using structured generation.
+*   Scores profiles **deterministically** against criteria.
+*   Generates personalized emails grounded in verified data.
+
+---
+
+## 🛠️ Scope & Constraints
+
+### In Scope
+*   NL people search (professional context).
+*   Sources: Tavily Web Search, GitHub API, Professional Directories.
+*   Deterministic lead scoring and ranking (MRR, Precision@5).
+*   Faithful personalized email composition.
+*   Observability: LLM tracing, cost tracking, hallucination detection.
+
+### Out of Scope
+*   Social media content analysis (Instagram, TikTok).
+*   Real-time email delivery/reply tracking.
+*   Global persistent profile database (Requires separate ingestion infra).
+
+### Engineering Constraints
+*   **Cost Efficiency**: LLM cost per search must stay **below $0.01**.
+*   **UX Latency**: Search must complete in **under 5 seconds**.
+*   **Scalability**: No per-profile LLM calls (prevents linear cost increase).
+
+---
+
+## ⚖️ Trade-offs & Design Decisions
+
+| Decision | Chosen | Rejected | Rationale |
+|---|---|---|---|
+| **Agent Framework** | **LangGraph** | CrewAI | Fine-grained state control, streaming, debuggable. |
+| **Lead Scoring** | **Deterministic Python** | Per-profile LLM | **70% cost reduction**, testable, reproducible. |
+| **Streaming** | **SSE** | WebSockets | Unidirectional, zero LB config, no upgrade handshake. |
+| **Vector DB** | **ChromaDB (Local)** | Pinecone | Zero infra for demo; Pinecone reserved for v2. |
+| **Primary LLM** | **Groq Llama 3** | GPT-4o | Sub-second latency, sufficient quality for planning. |
+| **Premium LLM** | **Claude 3.5 Sonnet** | GPT-4o | Best instruction following for email composition. |
+| **Cache** | **In-memory TTL** | Redis | Zero infra, 80% of benefit for demo scope. |
+
+---
+
 ## 🚀 What This Demonstrates
 
 NexusAI is built to showcase production-grade AI engineering, moving far beyond typical wrapper apps. It proves mastery in:
