@@ -53,7 +53,9 @@ class LeadOut(BaseModel):
     experience: list[ExperienceItem] | None = None
 
     outreach_sent: bool
+    is_saved: bool
     created_at: datetime
+    source_query: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -74,6 +76,7 @@ class LeadUpdate(BaseModel):
     headline: str | None = None
     company: str | None = None
     location: str | None = None
+    is_saved: bool | None = None
 
 
 class LeadsByStatus(BaseModel):

@@ -14,6 +14,8 @@ from app.schemas.lead import LeadOut, LeadUpdate, LeadsByStatus
 
 router = APIRouter()
 
+_LIBRARY_LEAD_LIMIT = 500
+
 
 def _owned_session_or_404(db: Session, session_id: UUID, user: User) -> SearchSession:
     """Fetch a session owned by the current user or raise 404."""
@@ -39,12 +41,29 @@ async def list_leads(
     rows = (
         db.query(Lead)
         .filter(Lead.session_id == session_id)
-        .order_by(Lead.match_score.desc())
+        .order_by(Lead.created_at.desc(), Lead.match_score.desc())
         .all()
     )
     fully = [LeadOut.model_validate(r) for r in rows if r.match_status == "fully_matched"]
     partial = [LeadOut.model_validate(r) for r in rows if r.match_status != "fully_matched"]
     return LeadsByStatus(fully_matched=fully, partially_matched=partial)
+
+
+@router.get("/library", response_model=list[LeadOut])
+async def list_lead_library(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[LeadOut]:
+    """All leads across the user's search sessions (My List). Must stay above ``/{lead_id}``."""
+    rows = (
+        db.query(Lead)
+        .join(SearchSession, Lead.session_id == SearchSession.id)
+        .filter(SearchSession.user_id == user.id, Lead.is_saved == True)
+        .order_by(Lead.created_at.desc(), Lead.match_score.desc())
+        .limit(_LIBRARY_LEAD_LIMIT)
+        .all()
+    )
+    return [LeadOut.model_validate(r) for r in rows]
 
 
 @router.get("/{lead_id}", response_model=LeadOut)

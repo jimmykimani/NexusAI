@@ -24,8 +24,18 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = Field(default="")
     OPENROUTER_API_KEY: str = Field(default="")
 
+
+    # LangSmith / LangChain observability
+    LANGCHAIN_TRACING_V2: bool = Field(default=False)
+    LANGCHAIN_API_KEY: str = Field(default="")
+    LANGCHAIN_PROJECT: str = Field(default="nexusai-development")
+
+    # GitHub API (free, 5k req/hour authenticated)
+    GITHUB_TOKEN: str = Field(default="")
+
     # Search
     TAVILY_API_KEY: str = Field(default="")
+    SERPER_API_KEY: str = Field(default="")
     # Optional: Apollo.io People Search (merged with Tavily). Accepts common env names.
     APOLLO_API_KEY: str = Field(
         default="",
@@ -78,11 +88,18 @@ class Settings(BaseSettings):
     OPENAI_REASONING_MODEL: str = Field(default="gpt-4o")
     OPENAI_FAST_MODEL: str = Field(default="gpt-4o-mini")
 
+    GROQ_REASONING_MODEL: str = Field(default="llama-3.3-70b-versatile")
+    GROQ_FAST_MODEL: str = Field(default="llama-3.1-8b-instant")
+
     # openai | anthropic | groq | openrouter
     LLM_PROVIDER: str = Field(default="groq")
 
+    # POST /search routing: llm = fast model classifies search vs chat; heuristic = regex only (no extra call).
+    INTENT_ROUTER: str = Field(default="llm")
+
     GROQ_BASE_URL: str = Field(default="https://api.groq.com/openai/v1")
     OPENROUTER_BASE_URL: str = Field(default="https://openrouter.ai/api/v1")
+
     OPENROUTER_HTTP_REFERER: str = Field(
         default="http://localhost:5173",
         description="Optional attribution header for OpenRouter.",
@@ -94,6 +111,11 @@ class Settings(BaseSettings):
 
     # Dev flag: skip JWT auth and use a default dev user (ONLY for local testing)
     DISABLE_AUTH: bool = Field(default=False)
+
+    # Feature Flags
+    ENABLE_LLM_RERANK: bool = Field(default=False)
+    ENABLE_SEARCH_NARRATION: bool = Field(default=True)
+    ENABLE_CHROMA: bool = Field(default=False)
 
     # Clerk (primary auth provider). Leave issuer blank to skip Clerk verification.
     CLERK_ISSUER: str = Field(default="https://tough-fox-32.clerk.accounts.dev")
@@ -120,6 +142,7 @@ class Settings(BaseSettings):
             missing.append("GROQ_API_KEY")
         if self.LLM_PROVIDER == "openrouter" and not (self.OPENROUTER_API_KEY or "").strip():
             missing.append("OPENROUTER_API_KEY")
+
         if not self.TAVILY_API_KEY:
             missing.append("TAVILY_API_KEY")
         if missing:
@@ -128,6 +151,15 @@ class Settings(BaseSettings):
                 + ", ".join(missing)
                 + ". Copy .env.example to .env and fill them in."
             )
+
+    @field_validator("INTENT_ROUTER", mode="before")
+    @classmethod
+    def _intent_router(cls, value: object) -> str:
+        v = (value if value is not None else "llm")
+        s = str(v).strip().lower()
+        if s not in ("llm", "heuristic"):
+            return "llm"
+        return s
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

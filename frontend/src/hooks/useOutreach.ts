@@ -41,7 +41,6 @@ export function useOutreach() {
           lead_id: email.lead_id,
           subject: email.subject,
           body: email.body,
-          to_email: email.to_email,
         })
         showToast('success', `Sent to ${data.recipient_email} (${data.message_id})`)
         return true

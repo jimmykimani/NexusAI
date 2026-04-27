@@ -9,7 +9,9 @@ import re
 from typing import Any
 
 from app.agents.state import NexusState
-from app.services.llm import llm_chat
+from app.services.ranking import score_profile
+from app.services.guardrail import check_leads_pii
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -59,46 +61,30 @@ async def ranking_node(state: NexusState) -> NexusState:
     )
 
     def _score_one(profile: dict[str, Any]) -> dict[str, Any]:
-        try:
-            text = llm_chat(
-                system=rank_prompt,
-                user=json.dumps(profile)[:4000],
-                tier="fast",
-                max_tokens=300,
-                temperature=0.0,
-                json_response=True,
-            )
-            parsed = _extract_json(text)
-            score = float(parsed.get("score", 50) or 50)
-            status = parsed.get("match_status") or (
-                "fully_matched" if score >= 86 else "partially_matched"
-            )
-            return {
-                **profile,
-                "match_score": score,
-                "match_status": status,
-                "matched_criteria": parsed.get("matched_criteria", {}),
-                "reasoning": parsed.get("reasoning", ""),
-            }
-        except Exception as exc:
-            logger.warning("Ranking failed for profile, defaulting: %s", exc)
-            return {
-                **profile,
-                "match_score": 50.0,
-                "match_status": "partially_matched",
-                "matched_criteria": {},
-                "reasoning": "Defaulted due to ranking error.",
-            }
+        result = score_profile(profile, criteria)
+        return {
+            **profile,
+            "match_score": result.score,
+            "match_status": result.match_status,
+            "matched_criteria": result.matched_criteria,
+            "reasoning": result.reasoning,
+        }
 
-    # Score profiles concurrently so 20+ leads don't queue one-by-one.
-    # Preserve ContextVar LLM overrides (chat UI) inside thread workers.
-    ctx = contextvars.copy_context()
-    tasks = [asyncio.to_thread(ctx.run, _score_one, p) for p in raw_results]
-    scored = list(await asyncio.gather(*tasks)) if tasks else []
+    # Score profiles. We no longer need concurrent threads for LLM calls, 
+    # but we can still process in parallel or just map them.
+    scored = [_score_one(p) for p in raw_results]
+    
+    # Optional: LLM Rerank for top 10 (future optimization)
+    if settings.ENABLE_LLM_RERANK and len(scored) > 0:
+        # One day: batch call the LLM once with the top 10 profiles to refine order
+        pass
 
     scored.sort(key=lambda x: x.get("match_score", 0), reverse=True)
     fully = [l for l in scored if l.get("match_status") == "fully_matched"]
     partial = [l for l in scored if l.get("match_status") != "fully_matched"]
+
+    # Part 6: Guardrails
+    scored = check_leads_pii(scored)
 
     events.append(
         {

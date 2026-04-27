@@ -8,6 +8,7 @@ import { HeroSearch } from '@/components/home/HeroSearch'
 import { ProcessView } from '@/components/aux/ProcessView'
 import { EmailsView } from '@/components/aux/EmailsView'
 import { MyListView } from '@/components/aux/MyListView'
+import { SystemView } from '@/components/aux/SystemView'
 import { SessionChip } from '@/components/results/SessionChip'
 import { useSSE } from '@/hooks/useSSE'
 import { useSearchStore } from '@/stores/searchStore'
@@ -21,6 +22,7 @@ import { useUIStore } from '@/stores/uiStore'
  */
 export function Layout() {
   const activeSessionId = useSearchStore((s) => s.activeSessionId)
+  const sseStreamEpoch = useSearchStore((s) => s.sseStreamEpoch)
   const activeThreadTurns = useSearchStore((s) => s.activeThreadTurns)
   const sessions = useSearchStore((s) => s.sessions)
   const isSearching = useSearchStore((s) => s.isSearching)
@@ -30,10 +32,19 @@ export function Layout() {
   const setAuxView = useUIStore((s) => s.setAuxView)
   const openSettings = useUIStore((s) => s.openSettings)
 
-  useSSE(isSearching ? activeSessionId : null)
+  const sseSessionId =
+    isSearching && activeSessionId && !activeSessionId.startsWith('local-')
+      ? activeSessionId
+      : null
+  useSSE(sseSessionId, sseStreamEpoch)
 
   const currentTurn = useMemo(
-    () => activeThreadTurns.find((turn) => turn.session_id === activeSessionId) ?? activeThreadTurns.at(-1) ?? null,
+    () =>
+      (activeSessionId
+        ? activeThreadTurns.filter((turn) => turn.session_id === activeSessionId).at(-1)
+        : null) ??
+      activeThreadTurns.at(-1) ??
+      null,
     [activeSessionId, activeThreadTurns],
   )
   const activeSession = useMemo(
@@ -50,12 +61,6 @@ export function Layout() {
     return hasRankedData || hasSearchEvents || searchInFlight
   }, [eventCount, isSearching, leadCount, searchLikeSession, searchLikeTurn])
 
-  useEffect(() => {
-    if (auxView === 'system' || auxView === 'logs') {
-      setAuxView('chat')
-      openSettings('system')
-    }
-  }, [auxView, openSettings, setAuxView])
 
   return (
     <div className="flex h-screen bg-nexus-bg text-nexus-text overflow-hidden">
@@ -64,6 +69,7 @@ export function Layout() {
       {auxView === 'process' && <ProcessView />}
       {auxView === 'emails' && <EmailsView />}
       {auxView === 'mylist' && <MyListView />}
+      {auxView === 'system' && <SystemView />}
 
       {auxView === 'chat' && (
         !hasThreadContext ? (

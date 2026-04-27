@@ -199,6 +199,7 @@ function ProfileTab() {
 function UsageTab() {
   const sessions = useSearchStore((state) => state.sessions)
   const sessionTimings = useSearchStore((state) => state.sessionTimings)
+  const { data } = useMetrics()
   const [page, setPage] = useState(1)
 
   const entries = useMemo<UsageEntry[]>(
@@ -233,9 +234,9 @@ function UsageTab() {
     [sessions, sessionTimings],
   )
 
-  const totalTokens = entries.reduce((sum, entry) => sum + Math.max(entry.tokenCount, 0), 0)
-  const totalInputTokens = sessions.reduce((sum, session) => sum + (session.input_tokens ?? 0), 0)
-  const totalOutputTokens = sessions.reduce((sum, session) => sum + (session.output_tokens ?? 0), 0)
+  const totalTokens = data?.summary?.total_tokens ?? 0
+  const totalInputTokens = data?.summary?.input_tokens ?? 0
+  const totalOutputTokens = data?.summary?.output_tokens ?? 0
   const pageCount = Math.max(1, Math.ceil(entries.length / PAGE_SIZE))
   const pageEntries = entries.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
@@ -516,8 +517,8 @@ function SystemTab() {
         </div>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-        <PanelCard className="bg-gradient-to-br from-white/85 to-nexus-card/70">
+      <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
+        <PanelCard className="bg-gradient-to-br from-nexus-surface/80 to-nexus-card/40 border-nexus-accent/30 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-4">
             <div>
               <div className="text-sm font-semibold text-nexus-text">Health and runtime</div>
@@ -562,7 +563,7 @@ function SystemTab() {
         </PanelCard>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+      <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
         <EvalCard data={data} isRunningEval={isRunningEval} onRunEval={runEval} />
 
         <PanelCard>
@@ -629,6 +630,26 @@ function SystemTab() {
           </button>
         </div>
         <SystemLogsTable logs={logs} isLoading={logsLoading} />
+      </PanelCard>
+      
+      <PanelCard className="bg-gradient-to-r from-nexus-card to-nexus-bg border-indigo-500/20">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-base font-semibold text-nexus-text flex items-center gap-2">
+               <ShieldCheck className="w-5 h-5 text-indigo-400" />
+               LangSmith Tracing
+            </div>
+            <div className="text-sm text-nexus-muted mt-1">Deep infrastructure observability. To see your true agentic trace waterfalls, please review your LangSmith project.</div>
+          </div>
+          <a
+            href="https://smith.langchain.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-primary bg-indigo-600 hover:bg-indigo-700 !text-white"
+          >
+            Open LangSmith Dashboard
+          </a>
+        </div>
       </PanelCard>
     </div>
   )

@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import {
+  Activity,
   ChevronsLeft,
   ChevronsRight,
   Globe,
@@ -100,6 +101,13 @@ export function Sidebar() {
           compact={sidebarCollapsed}
           active={auxView === 'mylist'}
           onClick={() => setAuxView('mylist')}
+        />
+        <NavItem
+          icon={Activity}
+          label="System"
+          compact={sidebarCollapsed}
+          active={auxView === 'system'}
+          onClick={() => setAuxView('system')}
         />
       </nav>
 

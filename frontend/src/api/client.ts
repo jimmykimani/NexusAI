@@ -1,6 +1,27 @@
 import axios, { AxiosError } from 'axios'
 
-const baseURL = (import.meta.env.VITE_API_URL as string | undefined) || ''
+/**
+ * In dev, prefer same-origin `/api/v1` so Vite proxies to FastAPI (see `vite.config.ts`).
+ * If `VITE_API_URL` points at loopback:8000, browsers often bypass the proxy and hit the
+ * wrong interface (or nothing) — force proxy by returning ''.
+ */
+function resolveApiBaseUrl(): string {
+  const raw = (import.meta.env.VITE_API_URL as string | undefined)?.trim() ?? ''
+  if (!raw) return ''
+  if (!import.meta.env.DEV) return raw
+  try {
+    const u = new URL(raw)
+    const h = u.hostname.toLowerCase()
+    const loopback = h === 'localhost' || h === '127.0.0.1' || h === '[::1]'
+    // Same-machine API on 8000: use Vite `/api` proxy (avoids IPv4/IPv6 localhost mismatches).
+    if (loopback && u.port === '8000') return ''
+  } catch {
+    return raw
+  }
+  return raw
+}
+
+const baseURL = resolveApiBaseUrl()
 
 export const api = axios.create({
   baseURL: `${baseURL}/api/v1`,
@@ -52,6 +73,12 @@ export function apiErrorMessage(err: unknown): string {
     if (Array.isArray(data?.detail)) {
       const first = data.detail[0]
       if (first && typeof first === 'object' && 'msg' in first && first.msg) return String(first.msg)
+    }
+    if (err.code === 'ERR_NETWORK' || err.message === 'Network Error') {
+      return (
+        'Cannot reach API. Start the backend (e.g. port 8000), set VITE_API_URL if not using the Vite ' +
+        'proxy, or set VITE_DEV_PROXY_TARGET for dockerized APIs.'
+      )
     }
     return err.message
   }

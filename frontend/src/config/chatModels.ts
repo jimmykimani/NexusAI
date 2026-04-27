@@ -1,6 +1,6 @@
 /** Presets for the in-chat model selector (must stay in sync with backend keys). */
 
-export type ChatLlmProvider = 'openai' | 'groq' | 'openrouter' | 'anthropic'
+export type ChatLlmProvider = 'openai' | 'groq' | 'openrouter' | 'anthropic' | 'deepseek'
 
 export interface ChatModelProfile {
   id: string
@@ -51,6 +51,23 @@ export const CHAT_MODEL_PROFILES: ChatModelProfile[] = [
     provider: 'openrouter',
     reasoningModel: 'google/gemini-2.0-flash-001',
     fastModel: 'google/gemini-2.0-flash-001',
+  },
+
+  {
+    id: 'openrouter-qwen',
+    pill: 'Qwen 2.5 72B',
+    description: 'OpenRouter · high speed + context',
+    provider: 'openrouter',
+    reasoningModel: 'qwen/qwen-2.5-72b-instruct',
+    fastModel: 'qwen/qwen-2.5-72b-instruct',
+  },
+  {
+    id: 'openrouter-llama-3-free',
+    pill: 'Llama 3 (Free)',
+    description: 'OpenRouter · free pool escape valve',
+    provider: 'openrouter',
+    reasoningModel: 'meta-llama/llama-3-70b-instruct:free',
+    fastModel: 'meta-llama/llama-3-8b-instruct:free',
   },
 ]
 

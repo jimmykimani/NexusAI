@@ -19,12 +19,17 @@ export function useSearch() {
         showToast('error', 'Please enter a message first.')
         return null
       }
+      // Optimistically clear the textbox to remove lag feeling
+      setQuery('')
+      
       const sessionId = await startSearch(q)
       if (!sessionId) {
-        showToast('error', 'Message could not be sent. Check your connection.')
-      } else {
-        // Reset the textbox so the next question starts blank.
-        setQuery('')
+        // Restore query on failure
+        setQuery(q)
+        showToast(
+          'error',
+          useSearchStore.getState().lastError || 'Message could not be sent. Check your connection.',
+        )
       }
       return sessionId
     },

@@ -7,15 +7,15 @@ from __future__ import annotations
 import re
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
-from typing import Iterator, Literal
+from dataclasses import dataclass, field
+from typing import Iterator, Literal, Optional
 
 from app.core.config import settings
 
 Tier = Literal["reasoning", "fast"]
 
 _MODEL_ID_RE = re.compile(r"^[a-zA-Z0-9._/:-]{1,96}$")
-_ALLOWED_PROVIDERS = frozenset({"openai", "groq", "openrouter", "anthropic"})
+_ALLOWED_PROVIDERS = frozenset({"openai", "groq", "openrouter"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +29,15 @@ _override: ContextVar[LLMRequestOverride | None] = ContextVar(
     "llm_request_override", default=None
 )
 
+@dataclass(frozen=True, slots=True)
+class LLMTrackingContext:
+    user_id: Optional[str] = None
+    session_id: Optional[str] = None
+
+_tracking: ContextVar[LLMTrackingContext | None] = ContextVar(
+    "llm_tracking_context", default=None
+)
+
 
 def get_override() -> LLMRequestOverride | None:
     return _override.get()
@@ -36,26 +45,32 @@ def get_override() -> LLMRequestOverride | None:
 
 def effective_provider() -> str:
     o = _override.get()
-    if o:
-        return o.provider
-    return settings.LLM_PROVIDER
+    p = o.provider if o else settings.LLM_PROVIDER
+    if p == "deepseek":
+        return "groq"
+    return p
 
 
-def effective_model(tier: Tier) -> str:
+def effective_model(tier: Tier, provider: str | None = None) -> str:
     o = _override.get()
-    if o:
+    p = provider or (o.provider if o else settings.LLM_PROVIDER)
+    
+    # If a request-level override is active AND it matches the current provider being called,
+    # then use the specific model the user requested.
+    if o and (provider is None or provider == o.provider):
         return o.reasoning_model if tier == "reasoning" else o.fast_model
-    if settings.LLM_PROVIDER == "anthropic":
-        return (
-            settings.CLAUDE_REASONING_MODEL
-            if tier == "reasoning"
-            else settings.CLAUDE_FAST_MODEL
-        )
-    return (
-        settings.OPENAI_REASONING_MODEL
-        if tier == "reasoning"
-        else settings.OPENAI_FAST_MODEL
-    )
+    
+    # Otherwise, fallback to the provider's default settings
+    if p == "groq":
+        # DO NOT use gpt-4o for Groq!
+        return settings.GROQ_REASONING_MODEL if tier == "reasoning" else settings.GROQ_FAST_MODEL
+    
+    if p == "openai" or p == "openrouter":
+        return settings.OPENAI_REASONING_MODEL if tier == "reasoning" else settings.OPENAI_FAST_MODEL
+    
+
+
+    return settings.OPENAI_REASONING_MODEL if tier == "reasoning" else settings.OPENAI_FAST_MODEL
 
 
 @contextmanager
@@ -68,6 +83,18 @@ def llm_request_context(override: LLMRequestOverride | None) -> Iterator[None]:
         yield
     finally:
         _override.reset(token)
+
+@contextmanager
+def llm_tracking_context(user_id: str | None, session_id: str | None) -> Iterator[None]:
+    ctx = LLMTrackingContext(user_id=user_id, session_id=session_id)
+    token = _tracking.set(ctx)
+    try:
+        yield
+    finally:
+        _tracking.reset(token)
+
+def get_tracking() -> LLMTrackingContext | None:
+    return _tracking.get()
 
 
 def validate_override(provider: str, reasoning: str, fast: str) -> LLMRequestOverride:
@@ -86,6 +113,8 @@ def validate_override(provider: str, reasoning: str, fast: str) -> LLMRequestOve
         raise ValueError("GROQ_API_KEY is not configured for Groq.")
     if p == "openrouter" and not (settings.OPENROUTER_API_KEY or "").strip():
         raise ValueError("OPENROUTER_API_KEY is not configured for OpenRouter.")
+    if p == "deepseek" and not (settings.DEEPSEEK_API_KEY or "").strip():
+        raise ValueError("DEEPSEEK_API_KEY is not configured for DeepSeek.")
     if p == "anthropic" and not (settings.ANTHROPIC_API_KEY or "").strip():
         raise ValueError("ANTHROPIC_API_KEY is not configured for Anthropic.")
 

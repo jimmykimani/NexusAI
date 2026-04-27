@@ -8,68 +8,36 @@ from typing import Any
 
 from app.agents.state import NexusState
 from app.services.llm import llm_chat
+from app.core.prompts import load_prompt
+# from app.services.chroma_storage import query_semantic_cache, store_search
 
 logger = logging.getLogger(__name__)
 
 
-SUPERVISOR_PROMPT = """You are NexusAI's Search Supervisor. You decompose free-text
-"find me" requests into a structured search plan that a downstream web-search agent
-can execute.
+def get_supervisor_prompt() -> str:
+    return load_prompt("supervisor", "v1")
 
-You handle ANY type of person: influencers, creators, executives (CEOs, founders),
-engineers, researchers, designers, investors, talent, athletes, artists, academics,
-journalists, students. Do not assume it is only engineers.
 
-Respond with ONLY a single JSON object in this shape, no prose:
 
-{
-  "criteria": {
-    "person_type": "creator|influencer|executive|founder|engineer|designer|investor|researcher|journalist|talent|academic|other",
-    "roles": ["job titles or creator niches, e.g. 'Beauty Creator', 'CEO', 'ML Engineer'"],
-    "location": "city, country or country or region (use empty string if none)",
-    "industry": "industry or content niche",
-    "seniority": "junior|mid|senior|executive|celebrity|unspecified",
-    "platforms": ["subset of: linkedin, github, twitter, tiktok, instagram, youtube, crunchbase, medium, personal_sites"],
-    "keywords": ["skills, signals, follower thresholds, keywords to look for"],
-    "min_followers": 0
-  },
-  "search_queries": [
-    "6-10 highly targeted web-search strings. Mix broad queries with platform-specific site: queries.",
-    "Always include at least one site:linkedin.com/in query when relevant.",
-    "For creators, include site:tiktok.com, site:instagram.com, site:youtube.com queries.",
-    "For executives, include site:crunchbase.com, site:linkedin.com/in, and 'CEO at X' style queries.",
-    "For engineers, include site:github.com and site:linkedin.com queries.",
-    "Add location to queries when the user specified one."
-  ],
-  "confidence": 0.0
-}
-
-Guidance for search_queries:
-- Produce 6-10 queries (more is better; downstream will cap).
-- Each query must be 3-12 words; never add quotes.
-- Use `site:` operators to target platforms. Examples:
-    - site:linkedin.com/in "beauty creator" Kenya
-    - site:tiktok.com beauty creator 100k followers
-    - site:instagram.com skincare creator Nairobi
-    - site:crunchbase.com fintech CEO Kenya
-    - site:github.com AI engineer Nairobi
-    - "startup CEO" Kenya fintech 2024
-- Include the location (if any) in most queries.
-- If the user mentioned follower counts or seniority, reflect that in criteria AND queries.
-
-Think briefly before responding, but output ONLY the JSON object.
-"""
 
 
 def _extract_json(text: str) -> dict[str, Any]:
-    """Extract the first JSON object from an LLM response."""
+    """Extract the first JSON object from an LLM response.
+
+    Returns an empty dict if no valid JSON can be found — never raises.
+    """
+    if not text or not text.strip():
+        return {}
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
-            return json.loads(match.group(0))
-        raise
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                return {}
+        return {}
 
 
 async def supervisor_node(state: NexusState) -> NexusState:
@@ -81,11 +49,31 @@ async def supervisor_node(state: NexusState) -> NexusState:
         }
     ]
 
+    chat_history = state.get("chat_history", [])
+    history_text = ""
+    if chat_history:
+        history_lines = []
+        for t in chat_history:
+            history_lines.append(f"User: {t.get('query')}")
+            if t.get('assistant_summary'):
+                history_lines.append(f"Assistant: {t.get('assistant_summary')}")
+        history_text = "PREVIOUS CHAT HISTORY:\n" + "\n".join(history_lines) + "\n\n"
+
+    retry_count = state.get("retry_count", 0)
+    retry_feedback = ""
+    if retry_count > 0:
+        retry_feedback = (
+            f"\n\n[SYSTEM MESSAGE: RETRIAL ATTEMPT #{retry_count}]\n"
+            "The previous search yielded insufficient results. "
+            "Please broaden your criteria (less restrictive keywords) or "
+            "try different search strings to capture a wider pool of relevant people."
+        )
+
     try:
         raw_text = llm_chat(
-            system=SUPERVISOR_PROMPT,
-            user=state["query"],
-            tier="reasoning",
+            system=get_supervisor_prompt(),
+            user=f"{history_text}CURRENT REQUEST: {state['query']}{retry_feedback}",
+            tier="fast",
             max_tokens=1400,
             temperature=0.15,
             json_response=True,
@@ -94,6 +82,11 @@ async def supervisor_node(state: NexusState) -> NexusState:
 
         criteria = parsed.get("criteria", {}) or {}
         queries = parsed.get("search_queries", []) or []
+
+        # Part 11: Store for future semantic hits (Disabled for demo)
+        # if settings.ENABLE_CHROMA and criteria:
+        #     ...
+
 
         # Normalize common fields so downstream nodes never have to guess.
         criteria.setdefault("person_type", "other")

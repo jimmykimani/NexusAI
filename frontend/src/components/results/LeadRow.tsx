@@ -61,6 +61,11 @@ export function LeadRow({ lead, rank, dynamicCols }: Props) {
                 {lead.headline || lead.title}
               </div>
             )}
+            {lead.source_query && (
+              <div className="text-[10px] text-nexus-subtle/90 truncate mt-0.5" title={lead.source_query}>
+                From: {lead.source_query}
+              </div>
+            )}
           </div>
         </button>
       </td>

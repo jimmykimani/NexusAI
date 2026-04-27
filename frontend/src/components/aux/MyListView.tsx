@@ -87,9 +87,21 @@ export function MyListView() {
                     className="rounded-[22px] border border-nexus-border bg-nexus-surface p-5 shadow-[0_14px_32px_-30px_rgba(15,23,42,0.28)]"
                   >
                     <div className="flex items-start gap-3">
-                      <div className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-nexus-card text-nexus-accent">
-                        {lead.outreach_sent ? <Sparkles className="h-4 w-4" /> : <Star className="h-4 w-4" />}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setLeads((prev) => prev.filter((l) => l.id !== lead.id))
+                          try {
+                            await api.patch(`/leads/${lead.id}`, { is_saved: false })
+                          } catch {
+                            // ignore errors for optimistic UX
+                          }
+                        }}
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-nexus-card text-nexus-accent border border-transparent hover:border-nexus-border transition-colors cursor-pointer"
+                        title="Remove from saved list"
+                      >
+                        {lead.outreach_sent ? <Sparkles className="h-4 w-4" /> : <Star className="h-4 w-4 fill-current" />}
+                      </button>
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-[15px] font-semibold text-nexus-text">
                           {lead.name || 'Unknown lead'}

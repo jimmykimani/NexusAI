@@ -7,39 +7,41 @@ word chunks (including all Anthropic runs).
 from __future__ import annotations
 
 import asyncio
+import json
+from collections import Counter
 import logging
 from typing import Any, AsyncIterator
 
+from app.core.config import settings
 from app.services.llm import (
     llm_chat,
     openai_style_async_client,
     should_use_openai_sdk_streaming,
 )
 from app.services.llm_runtime import effective_model
+from app.core.prompts import load_prompt
 
 logger = logging.getLogger(__name__)
 
-INTRO_SYSTEM = """You are NexusAI — a sharp, friendly research copilot (like a colleague who is great at people search).
-The user just submitted a search. Reply in 2–4 short sentences, first person ("I'll…").
-Acknowledge their goal, say you're setting up the search and scanning the open web, and sound confident — no bullet lists, no JSON, no emojis unless one tasteful emphasis fits.
-Stay under 120 words."""
 
-OUTRO_SYSTEM = """You are NexusAI — same voice as before: warm, concise, professional.
-The search finished. Summarize what landed in the results table in 2–5 sentences.
-Mention roughly how many strong vs weaker-fit profiles there are (use the counts provided).
-Encourage them to scan the table and open profiles. No bullet lists, no JSON.
-Stay under 160 words."""
+def get_intro_prompt() -> str:
+    return load_prompt("intro", "v1")
+
+
+def get_outro_prompt() -> str:
+    return load_prompt("outro", "v1")
 
 
 async def stream_intro_narrative(user_query: str) -> AsyncIterator[str]:
     """Yield streamed text tokens for the opening assistant message."""
-    q = (user_query or "").strip()
-    if not q:
+    if not settings.ENABLE_SEARCH_NARRATION:
         return
+
+    q = (user_query or "").strip()
 
     if not should_use_openai_sdk_streaming():
         text = llm_chat(
-            INTRO_SYSTEM,
+            get_intro_prompt(),
             f"User search:\n{q}",
             tier="reasoning",
             max_tokens=220,
@@ -56,7 +58,7 @@ async def stream_intro_narrative(user_query: str) -> AsyncIterator[str]:
             max_tokens=220,
             temperature=0.45,
             messages=[
-                {"role": "system", "content": INTRO_SYSTEM},
+                {"role": "system", "content": get_intro_prompt()},
                 {"role": "user", "content": f"User search:\n{q}"},
             ],
             stream=True,
@@ -64,10 +66,10 @@ async def stream_intro_narrative(user_query: str) -> AsyncIterator[str]:
         async for chunk in stream:
             choice = chunk.choices[0]
             if choice.delta and choice.delta.content:
-                yield choice.delta.content
+                yield persona_chunk(choice.delta.content, phase="intro")
     except Exception as exc:
         logger.warning("Intro narrative stream failed: %s", exc)
-        yield "I'll run this search across the web and line up the best matches in your results table."
+        yield persona_chunk("I'll run this search across the web and line up the best matches in your results table.", phase="intro")
 
 
 async def stream_outro_narrative(
@@ -77,30 +79,47 @@ async def stream_outro_narrative(
     status: str | None,
 ) -> AsyncIterator[str]:
     """Yield streamed closing summary after the graph completes."""
+    if not settings.ENABLE_SEARCH_NARRATION:
+        return
+
     q = (user_query or "").strip()
     fully = sum(1 for l in leads if l.get("match_status") == "fully_matched")
     partial = len(leads) - fully
     roles = (criteria or {}).get("roles") or []
     loc = (criteria or {}).get("location") or ""
+    location_mix = _top_values(leads, "location")
+    company_mix = _top_values(leads, "company")
+
+    if len(leads) == 0:
+        quick_role = ", ".join(str(role).strip() for role in roles[:2] if str(role).strip())
+        role_hint = quick_role or "the role"
+        place_hint = f" in {loc}" if str(loc).strip() else ""
+        yield (
+            f"I didn’t find any strong matches for {role_hint}{place_hint} in this pass. "
+            "Try widening the geography, relaxing one filter, or giving me a nearby company or title to pivot from."
+        )
+        return
 
     ctx = (
         f"User search:\n{q}\n\n"
         f"Planner notes — roles: {roles!s}, location: {loc!r}\n"
         f"Result status: {status or 'complete'}\n"
         f"Counts: {fully} fully matched (strong fit), {partial} partially matched (weaker or incomplete signal).\n"
-        f"Total rows in table: {len(leads)}."
+        f"Total rows in table: {len(leads)}.\n"
+        f"Top locations in results: {location_mix or 'not obvious'}.\n"
+        f"Top companies or organizations: {company_mix or 'mixed set'}."
     )
 
     if not should_use_openai_sdk_streaming():
         text = llm_chat(
-            OUTRO_SYSTEM,
+            get_outro_prompt(),
             ctx,
             tier="reasoning",
             max_tokens=320,
             temperature=0.4,
         )
         async for part in _chunk_words(text):
-            yield part
+            yield persona_chunk(part, phase="outro")
         return
 
     client = openai_style_async_client()
@@ -110,7 +129,7 @@ async def stream_outro_narrative(
             max_tokens=320,
             temperature=0.4,
             messages=[
-                {"role": "system", "content": OUTRO_SYSTEM},
+                {"role": "system", "content": get_outro_prompt()},
                 {"role": "user", "content": ctx},
             ],
             stream=True,
@@ -118,13 +137,67 @@ async def stream_outro_narrative(
         async for chunk in stream:
             choice = chunk.choices[0]
             if choice.delta and choice.delta.content:
-                yield choice.delta.content
+                yield persona_chunk(choice.delta.content, phase="outro")
     except Exception as exc:
         logger.warning("Outro narrative stream failed: %s", exc)
-        yield (
-            f"Wrapped up with {len(leads)} profiles: {fully} strong matches and {partial} partial fits. "
-            "Open any row to see the full picture."
+        yield persona_chunk("Check the results table for the best fits found during this research phase.", phase="outro")
+
+
+async def stream_feedback_message(
+    user_query: str,
+    criteria: dict[str, Any],
+    leads: list[dict[str, Any]],
+) -> AsyncIterator[str]:
+    """
+    Replaces generic outro narration with high-utility feedback.
+    Always runs regardless of ENABLE_SEARCH_NARRATION.
+    """
+    q = (user_query or "").strip()
+    fully = sum(1 for l in leads if l.get("match_status") == "fully_matched")
+    partial = len(leads) - fully
+    
+    sample_leads = [
+        {"name": l.get("name"), "title": l.get("title"), "company": l.get("company")}
+        for l in leads[:4]
+    ]
+    
+    prompt = load_prompt(
+        "feedback", "v1",
+        query=q,
+        fully_matched=fully,
+        partial=partial,
+        sample=json.dumps(sample_leads),
+        criteria=json.dumps(criteria or {}),
+    )
+    
+    if not should_use_openai_sdk_streaming():
+        text = llm_chat(
+            prompt,
+            "Synthesize search feedback.",
+            tier="fast",
+            max_tokens=350,
+            temperature=0.3,
         )
+        async for part in _chunk_words(text):
+            yield persona_chunk(part, phase="outro")
+        return
+
+    client = openai_style_async_client()
+    try:
+        stream = await client.chat.completions.create(
+            model=effective_model("fast"),
+            max_tokens=350,
+            temperature=0.3,
+            messages=[{"role": "user", "content": prompt}],
+            stream=True,
+        )
+        async for chunk in stream:
+            choice = chunk.choices[0]
+            if choice.delta and choice.delta.content:
+                yield persona_chunk(choice.delta.content, phase="outro")
+    except Exception as exc:
+        logger.warning("Feedback stream failed: %s", exc)
+        yield persona_chunk("Research complete. Your results table is up to date.", phase="outro")
 
 
 async def _chunk_words(text: str) -> AsyncIterator[str]:
@@ -134,3 +207,14 @@ async def _chunk_words(text: str) -> AsyncIterator[str]:
         yield w + (" " if i < len(words) - 1 else "")
         if i % 4 == 3:
             await asyncio.sleep(0)
+
+
+def _top_values(leads: list[dict[str, Any]], field: str, limit: int = 3) -> str:
+    counts = Counter()
+    for lead in leads:
+        value = str(lead.get(field) or "").strip()
+        if value:
+            counts[value] += 1
+    if not counts:
+        return ""
+    return ", ".join(name for name, _count in counts.most_common(limit))

@@ -42,3 +42,21 @@ class OutreachSendResponse(BaseModel):
 
     status: str
     message_id: str
+
+
+class SentEmailRecord(BaseModel):
+    """One row in GET /outreach/sent — mirrors the frontend ``SentEmail`` shape."""
+
+    id: str
+    lead_id: str | None = None
+    recipient_email: str
+    recipient_name: str | None = None
+    subject: str
+    body: str
+    status: str
+    message_id: str
+    created_at: str
+
+
+class OutreachSentListResponse(BaseModel):
+    emails: list[SentEmailRecord]

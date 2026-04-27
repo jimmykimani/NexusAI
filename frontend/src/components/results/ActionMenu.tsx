@@ -1,4 +1,4 @@
-import { ExternalLink, Mail, Copy, Github } from 'lucide-react'
+import { ExternalLink, Mail, Copy, Github, Star } from 'lucide-react'
 import { useUIStore } from '@/stores/uiStore'
 import { useSearchStore } from '@/stores/searchStore'
 import type { Lead } from '@/types'
@@ -9,6 +9,7 @@ export function ActionMenu({ lead }: { lead: Lead }) {
   const openOutreach = useUIStore((s) => s.openOutreach)
   const clearSelection = useSearchStore((s) => s.clearSelection)
   const selectLead = useSearchStore((s) => s.selectLead)
+  const toggleSave = useSearchStore((s) => s.toggleLeadSaved)
 
   async function copyEmail() {
     if (!lead.email) {
@@ -38,6 +39,14 @@ export function ActionMenu({ lead }: { lead: Lead }) {
         title="Copy email"
       >
         <Copy className="w-3.5 h-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => toggleSave(lead.id, lead.is_saved)}
+        className={`btn-ghost py-1 px-2 ${lead.is_saved ? 'text-nexus-accent hover:text-nexus-accent' : ''}`}
+        title={lead.is_saved ? 'Remove from list' : 'Add to list'}
+      >
+        <Star className={`w-3.5 h-3.5 ${lead.is_saved ? 'fill-current' : ''}`} />
       </button>
       {lead.linkedin_url && (
         <a

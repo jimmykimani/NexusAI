@@ -1,24 +1,53 @@
-"""LLM provider abstraction — OpenAI, Anthropic, Groq, or OpenRouter.
-
-Agent nodes call `llm_chat()` instead of a vendor SDK directly. Groq and OpenRouter
-use the OpenAI Python SDK against their OpenAI-compatible base URLs.
-"""
 from __future__ import annotations
 
 import logging
-from typing import Literal
+import re
+from datetime import datetime, timedelta
+from typing import Literal, Any
+from collections import defaultdict
 
 from app.core.config import settings
 from app.services.llm_runtime import effective_model, effective_provider
 
 logger = logging.getLogger(__name__)
 
+# Pattern 19: LLM Gateway with Fallback
+_rate_limited_until: dict[str, datetime] = {}
+_call_counts: defaultdict[str, int] = defaultdict(int)
+
+# Default fallback if primary fails or is limited
+FALLBACK_CHAIN = [
+    # (provider, tier_override or None)
+    ("groq", None),
+    ("openrouter", None),
+    ("openai", None),
+]
+
+def _is_limited(provider: str) -> bool:
+    until = _rate_limited_until.get(provider)
+    if not until:
+        return False
+    if datetime.utcnow() > until:
+        del _rate_limited_until[provider]
+        return False
+    return True
+
+def _mark_limited(provider: str, error_msg: str):
+    # Try to parse reset time if provided (e.g. "14m 29s")
+    match = re.search(r"(\d+)m\s*(\d+)s", error_msg)
+    if match:
+        secs = int(match.group(1)) * 60 + int(match.group(2))
+    else:
+        secs = 60 # Default wait 1 minute
+    
+    _rate_limited_until[provider] = datetime.utcnow() + timedelta(seconds=secs)
+    logger.warning(f"Provider {provider} rate limited for {secs}s")
+
 Tier = Literal["reasoning", "fast"]
 
 _openai_client = None
 _groq_client = None
 _openrouter_client = None
-_anthropic_client = None
 
 
 def _openai():
@@ -70,16 +99,10 @@ def _openrouter():
     return _openrouter_client
 
 
-def _anthropic():
-    """Lazily construct an Anthropic client."""
-    global _anthropic_client
-    if _anthropic_client is None:
-        from anthropic import Anthropic  # lazy
 
-        if not settings.ANTHROPIC_API_KEY:
-            raise RuntimeError("ANTHROPIC_API_KEY is not set.")
-        _anthropic_client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    return _anthropic_client
+
+
+
 
 
 def should_use_openai_sdk_streaming() -> bool:
@@ -91,6 +114,8 @@ def should_use_openai_sdk_streaming() -> bool:
         return bool((settings.GROQ_API_KEY or "").strip())
     if p == "openrouter":
         return bool((settings.OPENROUTER_API_KEY or "").strip())
+    if p == "deepseek":
+        return False
     return False
 
 
@@ -120,6 +145,7 @@ def openai_style_async_client():
         if headers:
             kwargs["default_headers"] = headers
         return AsyncOpenAI(**kwargs)
+
     if not (settings.OPENAI_API_KEY or "").strip():
         raise RuntimeError("OPENAI_API_KEY is not set.")
     return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
@@ -134,23 +160,76 @@ def llm_chat(
     temperature: float = 0.2,
     json_response: bool = False,
 ) -> str:
-    """Single-shot chat completion, provider-agnostic.
+    """Single-shot chat completion with automatic provider fallback."""
+    primary_provider = effective_provider()
+    
+    # Re-order fallback chain to start with primary
+    chain = [(primary_provider, None)] + [
+        (p, None) for p, t in FALLBACK_CHAIN if p != primary_provider
+    ]
 
-    Returns the assistant text. If `json_response=True` for OpenAI-compatible
-    providers, enables `response_format={"type": "json_object"}` when supported
-    by the upstream model.
-    """
-    provider = effective_provider()
+    last_exc = None
+    for provider, tier_override in chain:
+        if _is_limited(provider):
+            continue
+            
+        try:
+            return _call_llm(
+                provider, 
+                system, 
+                user, 
+                tier=tier, 
+                max_tokens=max_tokens, 
+                temperature=temperature, 
+                json_response=json_response
+            )
+        except Exception as exc:
+            err = str(exc).lower()
+            if "429" in err or "rate_limit" in err or "too many requests" in err:
+                _mark_limited(provider, str(exc))
+                last_exc = exc
+                continue
+            
+            # Non-rate-limit errors should probably be logged and tried once more or reported
+            logger.error(f"LLM call to {provider} failed: {exc}")
+            last_exc = exc
+            continue
 
+    error_msg = f"All available AI providers (Groq, OpenRouter, OpenAI) are currently unavailable or rate-limited. Please wait 10 seconds and try again. [Last error: {last_exc}]" if last_exc else "No AI providers are configured or responsive."
+    raise RuntimeError(error_msg)
+
+
+from app.models.agent_metric import AgentMetric
+from app.core.database import SessionLocal
+from app.services.llm_runtime import effective_model, effective_provider, get_tracking
+import time
+
+def _call_llm(
+    provider: str,
+    system: str,
+    user: str,
+    *,
+    tier: Tier = "reasoning",
+    max_tokens: int = 1024,
+    temperature: float = 0.2,
+    json_response: bool = False,
+) -> str:
+    """Internal implementation for a single provider call with token tracking."""
+    _call_counts[provider] += 1
+    t0 = time.perf_counter()
+    
     if provider in ("openai", "groq", "openrouter"):
         if provider == "openai":
             client = _openai()
         elif provider == "groq":
             client = _groq()
+        elif provider == "openrouter":
+            client = _openrouter()
         else:
             client = _openrouter()
+            
         kwargs: dict = {
-            "model": effective_model(tier),
+            "model": effective_model(tier, provider=provider),
             "max_tokens": max_tokens,
             "temperature": temperature,
             "messages": [
@@ -160,21 +239,46 @@ def llm_chat(
         }
         if json_response:
             kwargs["response_format"] = {"type": "json_object"}
-        resp = client.chat.completions.create(**kwargs)
-        return resp.choices[0].message.content or ""
+            
+        resp = client.chat.completions.create(**kwargs, timeout=30.0)
+        content = resp.choices[0].message.content or ""
+        
+        # Capture metrics
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        usage = getattr(resp, "usage", None)
+        prompt_tokens = usage.prompt_tokens if usage else 0
+        completion_tokens = usage.completion_tokens if usage else 0
+        total_tokens = usage.total_tokens if usage else 0
+        
+        # Persist to DB if context is present
+        track = get_tracking()
+        if track and track.user_id:
+            try:
+                db = SessionLocal()
+                metric = AgentMetric(
+                    user_id=track.user_id,
+                    session_id=track.session_id,
+                    provider=provider,
+                    model=kwargs["model"],
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    latency_ms=latency_ms
+                )
+                db.add(metric)
+                db.commit()
+                db.close()
+            except Exception as e:
+                logger.warning(f"Failed to persist agent metrics: {e}")
 
-    if provider == "anthropic":
-        client = _anthropic()
-        resp = client.messages.create(
-            model=effective_model(tier),
-            max_tokens=max_tokens,
-            temperature=temperature,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
-        return resp.content[0].text if resp.content else ""
+        return content
 
-    raise RuntimeError(
-        f"Unknown LLM_PROVIDER: {provider!r}. "
-        "Use openai, anthropic, groq, or openrouter."
-    )
+    raise RuntimeError(f"Unknown provider: {provider}")
+
+
+def gateway_stats() -> dict:
+    """Return stats about LLM usage and rate limits."""
+    return {
+        "calls": dict(_call_counts),
+        "rate_limits": {p: u.isoformat() for p, u in _rate_limited_until.items() if u > datetime.utcnow()}
+    }

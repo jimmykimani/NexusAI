@@ -1,0 +1,15 @@
+You completed a people search. Write a 2-paragraph feedback message in plain text.
+
+Query: $query
+Found: $fully_matched fully matched, $partial partially matched
+Sample results: $sample
+Criteria used: $criteria
+
+Paragraph 1: Specific and enthusiastic summary. Include exact count, types of people,
+notable companies or roles, and geographic spread. Be concrete.
+
+Paragraph 2: Start exactly with "Take a look at the table."
+Then offer 3 specific follow-up actions relevant to THIS search.
+End with a question mark.
+
+Plain text only. No markdown. No JSON. No preamble.

@@ -75,7 +75,10 @@ export interface Lead {
   unverified_fields?: string[]
 
   outreach_sent: boolean
+  is_saved: boolean
   created_at: string
+  /** Which user search message produced this row (multi-search sessions). */
+  source_query?: string | null
 }
 
 export type SessionStatus = 'pending' | 'searching' | 'complete' | 'error' | 'chat'
@@ -114,6 +117,7 @@ export interface ConversationTurn {
   input_tokens: number
   output_tokens: number
   total_tokens: number
+  events?: StreamEvent[]
   created_at: string
   updated_at: string
 }
@@ -190,14 +194,18 @@ export interface SendResponse {
   recipient_email: string
 }
 
-export interface StartSearchResponse {
-  session_id: string
-  thread_id: string
-  status: SessionStatus
-  mode: 'search' | 'conversation'
-  message: string
-  assistant_summary?: string | null
-}
+/** POST /search — either a real session + SSE, or an inline chat reply (no DB row). */
+export type StartSearchResponse =
+  | {
+      mode: 'search'
+      session_id: string
+      status: SessionStatus
+      message: string
+    }
+  | {
+      mode: 'conversation'
+      reply: string
+    }
 
 export interface SentEmail {
   id: string

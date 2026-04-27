@@ -1,12 +1,12 @@
 import { ArrowUp, Loader2, Plus } from 'lucide-react'
-import { useEffect, useRef, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { ChatModelPicker } from './ChatModelPicker'
 import { cn } from '@/lib/cn'
 
 interface Props {
   value: string
   onChange: (v: string) => void
-  onSubmit: () => void
+  onSubmit: (v: string) => void
   disabled?: boolean
   placeholder?: string
   /** `compact` trims vertical padding for the in-chat footer input. */
@@ -15,7 +15,6 @@ interface Props {
   glowing?: boolean
 }
 
-/** Multiline textarea + submit button; Enter submits, Shift+Enter = newline. */
 export function SearchInput({
   value,
   onChange,
@@ -25,14 +24,20 @@ export function SearchInput({
   compact,
   glowing,
 }: Props) {
+  const [localValue, setLocalValue] = useState(value)
   const ref = useRef<HTMLTextAreaElement>(null)
+
+  // Sync internal state with external value (e.g. when session changes)
+  useEffect(() => {
+    setLocalValue(value)
+  }, [value])
 
   useEffect(() => {
     const el = ref.current
     if (!el) return
     el.style.height = '0px'
     el.style.height = Math.min(el.scrollHeight, 160) + 'px'
-  }, [value])
+  }, [localValue])
 
   useEffect(() => {
     function handleFocusSearch() {
@@ -45,7 +50,19 @@ export function SearchInput({
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (!disabled && value.trim()) onSubmit()
+      if (!disabled && localValue.trim()) {
+        const q = localValue.trim()
+        setLocalValue('')
+        onSubmit(q)
+      }
+    }
+  }
+
+  function handleManualSubmit() {
+    if (!disabled && localValue.trim()) {
+      const q = localValue.trim()
+      setLocalValue('')
+      onSubmit(q)
     }
   }
 
@@ -59,8 +76,11 @@ export function SearchInput({
     >
       <textarea
         ref={ref}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={localValue}
+        onChange={(e) => {
+          setLocalValue(e.target.value)
+          onChange(e.target.value)
+        }}
         onKeyDown={onKey}
         disabled={disabled}
         placeholder={placeholder}
@@ -76,8 +96,8 @@ export function SearchInput({
         <ChatModelPicker disabled={disabled} menuPlacement="up" />
         <button
           type="button"
-          onClick={onSubmit}
-          disabled={disabled || !value.trim()}
+          onClick={handleManualSubmit}
+          disabled={disabled || !localValue.trim()}
           className="btn-primary w-8 h-8 p-0 rounded-full shrink-0"
           aria-label="Send"
         >

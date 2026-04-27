@@ -18,7 +18,8 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: process.env.VITE_API_URL || 'http://backend:8000',
+        // Local dev: browser hits /api on Vite; forward to FastAPI (Docker hostname is wrong on host OS).
+        target: process.env.VITE_DEV_PROXY_TARGET || 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
     },

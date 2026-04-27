@@ -5,15 +5,17 @@ import { useSearchStore } from '@/stores/searchStore'
 import type { StreamEvent } from '@/types'
 import { cn } from '@/lib/cn'
 
+interface AgentConversationProps {
+  events: StreamEvent[]
+  elapsedMs?: number | null
+}
+
 /**
  * Renders streamed persona copy + technical agent steps. After `complete`,
  * technical steps move into a collapsed "Background" disclosure so the panel
  * stays calm like Lessie, while intro/outro persona remain visible.
  */
-export function AgentConversation() {
-  const events = useSearchStore((s) => s.streamEvents)
-  const elapsedMs = useSearchStore((s) => s.lastSearchElapsedMs)
-
+export function AgentConversation({ events, elapsedMs }: AgentConversationProps) {
   const { intro, outro, technical, hasComplete } = useMemo(
     () => partitionStreamEvents(events),
     [events],
@@ -109,7 +111,7 @@ function partitionStreamEvents(events: StreamEvent[]) {
     if (e.type === 'persona_chunk') {
       const text = e.data?.text ?? ''
       if (e.data?.phase === 'outro') {
-        if (seenComplete) outroChunks.push(text)
+        outroChunks.push(text)
       } else {
         introChunks.push(text)
       }

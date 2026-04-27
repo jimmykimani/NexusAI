@@ -1,8 +1,11 @@
 """Outreach endpoints — AI email composition + (mocked) send."""
 from __future__ import annotations
 
+import copy
 import logging
 import uuid
+from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -18,6 +21,8 @@ from app.schemas.outreach import (
     OutreachComposeResponse,
     OutreachSendRequest,
     OutreachSendResponse,
+    OutreachSentListResponse,
+    SentEmailRecord,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,6 +72,72 @@ async def compose(
     return OutreachComposeResponse(emails=composed)
 
 
+def _merge_outreach_last_into_raw_data(
+    raw: dict[str, Any] | None,
+    *,
+    message_id: str,
+    subject: str,
+    body: str,
+) -> dict[str, Any]:
+    meta = copy.deepcopy(raw) if isinstance(raw, dict) else {}
+    nexus = meta.get("_nexus_meta")
+    if not isinstance(nexus, dict):
+        nexus = {}
+    sent_at = datetime.now(timezone.utc).isoformat()
+    nexus["outreach_last"] = {
+        "message_id": message_id,
+        "subject": subject,
+        "body": body,
+        "sent_at": sent_at,
+    }
+    meta["_nexus_meta"] = nexus
+    return meta
+
+
+@router.get("/sent", response_model=OutreachSentListResponse)
+async def list_sent_emails(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> OutreachSentListResponse:
+    """Sent outreach history for the mailbox UI (from leads marked sent + stored meta)."""
+    rows = (
+        db.query(Lead)
+        .join(SearchSession, Lead.session_id == SearchSession.id)
+        .filter(SearchSession.user_id == user.id, Lead.outreach_sent.is_(True))
+        .order_by(Lead.created_at.desc())
+        .limit(300)
+        .all()
+    )
+    records: list[SentEmailRecord] = []
+    for lead in rows:
+        raw = lead.raw_data
+        if not isinstance(raw, dict):
+            continue
+        nexus = raw.get("_nexus_meta")
+        if not isinstance(nexus, dict):
+            continue
+        last = nexus.get("outreach_last")
+        if not isinstance(last, dict):
+            continue
+        mid = str(last.get("message_id") or "")
+        rid = mid or str(lead.id)
+        records.append(
+            SentEmailRecord(
+                id=rid,
+                lead_id=str(lead.id),
+                recipient_email=lead.email or "",
+                recipient_name=lead.name,
+                subject=str(last.get("subject") or ""),
+                body=str(last.get("body") or ""),
+                status="sent",
+                message_id=mid,
+                created_at=str(last.get("sent_at") or ""),
+            )
+        )
+    records.sort(key=lambda r: r.created_at, reverse=True)
+    return OutreachSentListResponse(emails=records)
+
+
 @router.post("/send", response_model=OutreachSendResponse)
 async def send(
     payload: OutreachSendRequest,
@@ -85,6 +156,12 @@ async def send(
 
     message_id = f"mock-{uuid.uuid4().hex[:12]}"
     lead.outreach_sent = True
+    lead.raw_data = _merge_outreach_last_into_raw_data(
+        lead.raw_data if isinstance(lead.raw_data, dict) else {},
+        message_id=message_id,
+        subject=payload.subject,
+        body=payload.body,
+    )
     db.commit()
 
     logger.info(

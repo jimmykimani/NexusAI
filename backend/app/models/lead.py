@@ -58,6 +58,10 @@ class Lead(Base):
     raw_data = Column(JSONType, default=dict, nullable=True)
 
     outreach_sent = Column(Boolean, default=False, nullable=False)
+    is_saved = Column(Boolean, default=False, server_default="0", nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # User message that produced this lead (same session can hold multiple searches).
+    source_query = Column(Text, nullable=True)
 
     session = relationship("SearchSession", back_populates="leads")

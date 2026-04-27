@@ -1,9 +1,11 @@
 """Search endpoints: start a search, list/retrieve sessions, stream progress via SSE."""
 from __future__ import annotations
 
+import asyncio
 import logging
+from datetime import datetime, timedelta
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -19,11 +21,15 @@ from app.core.deps import (
 from app.models.search_session import SearchSession
 from app.models.user import User
 from app.schemas.search import (
+    ConversationStartResponse,
     SearchRequest,
     SearchSessionList,
     SearchSessionOut,
     SearchStartResponse,
 )
+from app.services.conversation_reply import conversational_reply
+from app.services.session_title import title_from_query
+from app.services.turn_intent import resolve_intent
 from app.services.graph_runner import format_sse, run_graph_streaming
 from app.services.llm_runtime import LLMRequestOverride, validate_override
 
@@ -49,30 +55,98 @@ def _llm_override_from_stream_request(request: Request) -> LLMRequestOverride | 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def _title_from_query(q: str, max_len: int = 60) -> str:
-    """Trim the raw query into a human-readable session title."""
-    q = q.strip().rstrip("?.!")
-    if len(q) <= max_len:
-        return q
-    return q[: max_len - 1].rsplit(" ", 1)[0] + "…"
-
-
-@router.post("", response_model=SearchStartResponse, status_code=201)
+@router.post("", response_model=SearchStartResponse | ConversationStartResponse, status_code=200)
 async def create_search(
     payload: SearchRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> SearchStartResponse:
-    """Create a new SearchSession. The caller then connects to the SSE stream."""
-    ss = SearchSession(
-        user_id=user.id,
-        title=_title_from_query(payload.query),
-        original_query=payload.query,
-        status="pending",
-    )
-    db.add(ss)
-    db.commit()
-    db.refresh(ss)
+) -> SearchStartResponse | ConversationStartResponse:
+    """Start a people search, or return a chat reply when the message is conversational."""
+    q = payload.query.strip()
+    cont = payload.continue_session_id
+
+    # Gather chat history for memory support
+    chat_history = []
+    if cont:
+        ss_prev = db.query(SearchSession).filter(SearchSession.id == cont, SearchSession.user_id == user.id).first()
+        if ss_prev and isinstance(ss_prev.criteria, dict):
+            chat_history = ss_prev.criteria.get("turn_history", [])
+
+    intent = await asyncio.to_thread(resolve_intent, q)
+    if intent == "conversation":
+        try:
+            reply = await asyncio.to_thread(conversational_reply, q, chat_history=chat_history)
+        except Exception as exc:
+            logger.warning("Conversation reply failed: %s", exc)
+            reply = (
+                "Hey — I’m here. Something hiccupped on my side, but I’m ready when you are. "
+                "Tell me who you want to find (role, company, or niche) and I’ll run a real search."
+            )
+        
+        # Persist chat memory to the session if it exists
+        if cont:
+            ss_mem = db.query(SearchSession).filter(SearchSession.id == cont, SearchSession.user_id == user.id).first()
+            if ss_mem:
+                criteria = ss_mem.criteria or {}
+                if not isinstance(criteria, dict): criteria = {}
+                history = criteria.get("turn_history", []) or []
+                history.append({
+                    "id": str(uuid4()),
+                    "query": q,
+                    "user_message": q,
+                    "assistant_summary": reply,
+                    "status": "chat",
+                    "session_id": str(ss_mem.id),
+                    "created_at": datetime.utcnow().isoformat()
+                })
+                criteria["turn_history"] = history
+                ss_mem.criteria = criteria
+                db.add(ss_mem)
+                db.commit()
+
+        return ConversationStartResponse(reply=reply)
+
+    q = payload.query.strip()
+    cont = payload.continue_session_id
+
+    if cont is not None:
+        ss = (
+            db.query(SearchSession)
+            .filter(SearchSession.id == cont, SearchSession.user_id == user.id)
+            .first()
+        )
+        if not ss:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if ss.status == "searching":
+            stale_threshold = datetime.utcnow() - timedelta(seconds=30)
+            if ss.updated_at and ss.updated_at < stale_threshold:
+                # Force-mark as error so new search can proceed
+                ss.status = "error"
+                ss.error = "Previous search took too long or connection was lost. Retrying..."
+                db.commit()
+            else:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This workspace already has a search in progress. Wait for it to finish.",
+                )
+        ss.status = "pending"
+        ss.error = None
+        ss.title = title_from_query(q)
+        criteria = dict(ss.criteria) if isinstance(ss.criteria, dict) else {}
+        criteria["current_query"] = q
+        ss.criteria = criteria
+        db.commit()
+        db.refresh(ss)
+    else:
+        ss = SearchSession(
+            user_id=user.id,
+            title=title_from_query(q),
+            original_query=q,
+            status="pending",
+        )
+        db.add(ss)
+        db.commit()
+        db.refresh(ss)
 
     return SearchStartResponse(
         session_id=ss.id,
@@ -164,20 +238,56 @@ async def stream_search(
     ss.status = "searching"
     db.commit()
 
-    query = ss.original_query
+    # Extract past conversation history for LLM memory
+    criteria = ss.criteria or {}
+    if not isinstance(criteria, dict):
+        criteria = {}
+        
+    # Prioritize the query passed in the URL (bypass DB race conditions)
+    q_param = request.query_params.get("q")
+    logger.info(f"SSE Connection: sessionId={session_id}, q_param={q_param}")
+    query = q_param if q_param else (criteria.get("current_query") or ss.original_query)
+        
     sess_id = ss.id
     uid = user.id
+    
+    chat_history = criteria.get("turn_history", [])
+    
     llm_override = _llm_override_from_stream_request(request)
 
     async def event_generator():
+        queue = asyncio.Queue()
+
+        async def _run():
+            try:
+                async for event in run_graph_streaming(
+                    query, sess_id, uid, chat_history=chat_history, llm_override=llm_override
+                ):
+                    await queue.put(event)
+            except Exception as exc:
+                logger.exception("SSE generator crashed")
+                await queue.put({"type": "error", "message": str(exc)})
+            finally:
+                await queue.put(None)
+
+        task = asyncio.create_task(_run())
+
         try:
-            async for event in run_graph_streaming(query, sess_id, uid, llm_override=llm_override):
-                if await request.is_disconnected():
-                    break
-                yield format_sse(event)
-        except Exception as exc:
-            logger.exception("SSE generator crashed")
-            yield format_sse({"type": "error", "message": str(exc)})
+            while True:
+                try:
+                    # Wait for an event with a timeout for heartbeat.
+                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    if event is None:
+                        break
+                    if await request.is_disconnected():
+                        break
+                    yield format_sse(event)
+                except asyncio.TimeoutError:
+                    if await request.is_disconnected():
+                        break
+                    yield format_sse({"type": "ping", "message": "keep-alive"})
+        finally:
+            task.cancel()
 
     return StreamingResponse(
         event_generator(),

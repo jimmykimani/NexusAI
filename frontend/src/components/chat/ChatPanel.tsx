@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef } from 'react'
-import { CheckCircle2, Loader2, Table2 } from 'lucide-react'
+import { useEffect, useRef } from 'react'
+import { AlertCircle, Loader2, Table2 } from 'lucide-react'
+import { cn } from '@/lib/cn'
 import { AgentConversation } from './AgentConversation'
 import { SearchInput } from './SearchInput'
 import { SearchHuntIndicator } from './SearchHuntIndicator'
@@ -11,8 +12,8 @@ import { useSearch } from '@/hooks/useSearch'
 
 /**
  * Chat panel shown in the two-panel view after a search has started.
- * Renders the user's original query as a bubble, then a flowing sequence
- * of agent step lines, and a session chip when complete.
+ * Keeps the conversation focused on the active session only, so follow-up
+ * searches feel like one thread instead of a mixed feed of old sessions.
  */
 export function ChatPanel({ standalone = false }: { standalone?: boolean }) {
   const { query, setQuery, isSearching, submit } = useSearch()
@@ -20,21 +21,17 @@ export function ChatPanel({ standalone = false }: { standalone?: boolean }) {
   const threadTurns = useSearchStore((s) => s.activeThreadTurns)
   const sessions = useSearchStore((s) => s.sessions)
   const activeId = useSearchStore((s) => s.activeSessionId)
+  const pendingQuery = useSearchStore((s) => s.pendingQuery)
   const lastError = useSearchStore((s) => s.lastError)
   const elapsedMs = useSearchStore((s) => s.lastSearchElapsedMs)
-  const loadSession = useSearchStore((s) => s.loadSession)
   const chatWidth = useUIStore((s) => s.chatWidth)
   const endRef = useRef<HTMLDivElement>(null)
 
   const activeSession = sessions.find((s) => s.id === activeId) ?? null
-  const currentTurn = threadTurns.find((turn) => turn.session_id === activeId) ?? null
-  const userQuery = currentTurn?.user_message ?? activeSession?.original_query ?? query
-  const previousTurns = threadTurns.filter((turn) => turn.session_id !== activeId)
-  const sessionsById = useMemo(() => {
-    const index = new Map<string, (typeof sessions)[number]>()
-    for (const s of sessions) index.set(s.id, s)
-    return index
-  }, [sessions])
+  const turnsForActive = threadTurns.filter((t) => t.session_id === activeId)
+  const currentTurn = turnsForActive.at(-1) ?? null
+  const previousTurns = turnsForActive.slice(0, -1)
+  const userQuery = pendingQuery ?? currentTurn?.user_message ?? activeSession?.original_query ?? query
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -61,23 +58,10 @@ export function ChatPanel({ standalone = false }: { standalone?: boolean }) {
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
-        <div className={`mx-auto w-full ${standalone ? 'max-w-[840px]' : ''} space-y-4`}>
+      <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+        <div className={`mx-auto w-full space-y-4 ${standalone ? 'max-w-[840px]' : ''}`}>
           {previousTurns.map((turn) => (
-            <ThreadTurnCard
-              key={turn.id}
-              turn={turn}
-              session={sessionsById.get(turn.session_id) ?? null}
-              isSelected={turn.session_id === activeId}
-              isCurrent={false}
-              isSearching={isSearching}
-              elapsedMs={null}
-              onOpen={(sessionId) => {
-                // Avoid interrupting the active SSE run by switching sessions mid-search.
-                if (isSearching) return
-                void loadSession(sessionId)
-              }}
-            />
+            <ThreadTurnCard key={turn.id} turn={turn} session={activeSession} />
           ))}
 
           {userQuery && <UserBubble text={userQuery} />}
@@ -85,31 +69,40 @@ export function ChatPanel({ standalone = false }: { standalone?: boolean }) {
           {isSearching && events.length === 0 && <ThinkingLine />}
           {isSearching && events.length > 0 && <SearchHuntIndicator />}
 
-          <AgentConversation />
+          <AgentConversation events={events} elapsedMs={elapsedMs} />
 
-          {!isSearching && events.length === 0 && currentTurn?.assistant_summary && (
-            <AssistantSummary text={currentTurn.assistant_summary} />
+          {/* Show Turn Results/Status Pill even while searching */}
+          {(currentTurn || (isSearching && pendingQuery)) && (
+            <div className="pt-2 animate-slide-in">
+              <SearchTurnMeta
+                sessionId={activeId ?? 'local'}
+                query={pendingQuery ?? currentTurn?.user_message ?? ''}
+                status={isSearching ? 'searching' : (activeSession?.status ?? currentTurn?.status ?? 'complete')}
+                resultCount={activeSession?.lead_count ?? currentTurn?.result_lead_count ?? 0}
+                isCurrentRun={true}
+                isSearching={isSearching}
+                elapsedMs={elapsedMs}
+              />
+            </div>
           )}
 
-          {currentTurn?.status !== 'chat' && currentTurn && (
-            <SearchResultCard
-              title={activeSession?.title || activeSession?.original_query || currentTurn.user_message}
-              sessionId={currentTurn.session_id}
-              status={activeSession?.status ?? currentTurn.status}
-              isSelected
-              isCurrentRun
-              isSearching={isSearching}
-              elapsedMs={elapsedMs}
-              onOpen={() => {
-                if (isSearching) return
-                void loadSession(currentTurn.session_id)
-              }}
-            />
+          {!isSearching && events.length === 0 && currentTurn?.assistant_summary && (
+            <div className="pt-2">
+              <AssistantSummary text={currentTurn.assistant_summary} />
+              <div className="flex items-center gap-4 pt-4 animate-slide-in-late">
+                <div className="flex items-center gap-1.5 py-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-nexus-accent animate-pulse" />
+                  <span className="text-[11px] font-semibold text-nexus-accent uppercase tracking-wider">Task Completed!!</span>
+                </div>
+                <div className="h-4 w-px bg-nexus-border/50" />
+                <SessionFeedbackRow sessionId={activeId ?? ''} />
+              </div>
+            </div>
           )}
 
           {errored && !isSearching && (
-            <div className="text-xs text-red-400 flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5" />
+            <div className="flex items-center gap-1.5 text-xs text-red-400">
+              <AlertCircle className="h-3.5 w-3.5" />
               Agent reported an error. Check logs for details.
             </div>
           )}
@@ -123,7 +116,7 @@ export function ChatPanel({ standalone = false }: { standalone?: boolean }) {
           <SearchInput
             value={query}
             onChange={setQuery}
-            onSubmit={() => submit()}
+            onSubmit={(val) => submit(val)}
             disabled={isSearching}
             placeholder="Reply to NexusAI…"
             compact
@@ -138,44 +131,55 @@ export function ChatPanel({ standalone = false }: { standalone?: boolean }) {
 function ThreadTurnCard({
   turn,
   session,
-  isSelected,
-  isCurrent,
-  isSearching,
-  elapsedMs,
-  onOpen,
 }: {
   turn: ConversationTurn
   session: { id: string; title: string | null; original_query: string; status: string } | null
-  isSelected: boolean
-  isCurrent: boolean
-  isSearching: boolean
-  elapsedMs: number | null
-  onOpen: (sessionId: string) => void
 }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-6">
       <UserBubble text={turn.user_message} />
-      {turn.assistant_summary ? <AssistantSummary text={turn.assistant_summary} /> : null}
-      {turn.status !== 'chat' && (
-        <SearchResultCard
-          title={session?.title || session?.original_query || turn.user_message}
-          sessionId={turn.session_id}
-          status={session?.status ?? turn.status}
-          isSelected={isSelected}
-          isCurrentRun={isCurrent}
-          isSearching={isSearching}
-          elapsedMs={elapsedMs}
-          onOpen={() => onOpen(turn.session_id)}
-        />
-      )}
+      <div className="flex flex-col gap-3">
+        {turn.events && turn.events.length > 0 && (
+          <div className="pl-1">
+            <AgentConversation events={turn.events} />
+          </div>
+        )}
+        {turn.assistant_summary ? (
+          <div className="space-y-4">
+            <AssistantSummary text={turn.assistant_summary} />
+            {turn.status !== 'chat' && (
+              <div className="pl-1 space-y-4">
+                <SearchTurnMeta
+                  sessionId={turn.session_id}
+                  query={turn.user_message}
+                  status={turn.status ?? session?.status}
+                  resultCount={turn.result_lead_count}
+                  isCurrentRun={false}
+                  isSearching={false}
+                  elapsedMs={null}
+                />
+                <div className="flex items-center gap-4 pt-1 animate-slide-in-late">
+                  <div className="flex items-center gap-1.5 py-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-nexus-accent/50" />
+                    <span className="text-[11px] font-semibold text-nexus-muted uppercase tracking-wider">Archived Result</span>
+                  </div>
+                  <div className="h-4 w-px bg-nexus-border/50" />
+                  <SessionFeedbackRow sessionId={turn.session_id} />
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
 
 function UserBubble({ text }: { text: string }) {
   return (
-    <div className="flex justify-end">
-      <div className="max-w-[85%] rounded-2xl bg-nexus-card border border-nexus-border px-3.5 py-2 text-sm leading-relaxed">
+    <div className="flex flex-col items-end gap-1 animate-slide-in">
+      <div className="text-[10px] uppercase tracking-wider text-nexus-muted px-1">User</div>
+      <div className="max-w-[70%] rounded-2xl border border-nexus-border bg-nexus-elevated/40 px-3.5 py-2 text-[13px] leading-relaxed text-nexus-text shadow-sm">
         {text}
       </div>
     </div>
@@ -184,7 +188,7 @@ function UserBubble({ text }: { text: string }) {
 
 function ThinkingLine() {
   return (
-    <p className="flex items-center gap-2 text-sm italic text-nexus-muted">
+    <p className="flex items-center gap-2 text-sm italic text-nexus-muted animate-slide-in">
       <Loader2 className="h-3.5 w-3.5 animate-spin" />
       Thinking…
     </p>
@@ -193,81 +197,100 @@ function ThinkingLine() {
 
 function AssistantSummary({ text }: { text: string }) {
   return (
-    <div className="max-w-[95%] rounded-2xl border border-nexus-border/80 bg-nexus-card/60 px-4 py-3 text-[13px] leading-relaxed text-nexus-text whitespace-pre-wrap">
-      {text}
+    <div className="flex flex-col gap-1.5 animate-slide-in max-w-[90%]">
+      <div className="flex items-center gap-2 px-1">
+        <div className="w-4 h-4 rounded-full bg-nexus-accent/20 flex items-center justify-center">
+          <div className="w-1.5 h-1.5 rounded-full bg-nexus-accent" />
+        </div>
+        <div className="text-[10px] uppercase tracking-wider text-nexus-muted">NexusAI</div>
+      </div>
+      <div className="text-[14px] leading-relaxed whitespace-pre-wrap text-nexus-text pl-1">
+        {text}
+      </div>
     </div>
   )
 }
 
-function SearchResultCard({
-  title,
-  elapsedMs,
+function SearchTurnMeta({
   sessionId,
+  query,
   status,
-  isSelected,
+  resultCount,
   isCurrentRun,
   isSearching,
-  onOpen,
+  elapsedMs,
 }: {
-  title: string | null
-  elapsedMs: number | null
   sessionId: string
+  query: string | null
   status: string | null
-  isSelected: boolean
+  resultCount: number
   isCurrentRun: boolean
   isSearching: boolean
-  onOpen: () => void
+  elapsedMs: number | null
 }) {
   const showCompleted = status === 'complete' && (!isCurrentRun || !isSearching)
-  const showInProgress = !showCompleted
+  const showEmpty = showCompleted && resultCount === 0
   const timing =
     showCompleted && elapsedMs != null && elapsedMs >= 0 ? ` · ${(elapsedMs / 1000).toFixed(1)}s total` : ''
+  const countLabel =
+    resultCount > 0
+      ? `${resultCount} profile${resultCount === 1 ? '' : 's'} ready in the table`
+      : 'No matches were found in this pass'
+
+  if (isCurrentRun && isSearching) return null
+
+  const setActiveResultQuery = useSearchStore((s) => s.setActiveResultQuery)
+  const activeResultQuery = useSearchStore((s) => s.activeResultQuery)
+  const isSelected = activeResultQuery === query && query !== null
+
   return (
-    <div className="pt-2 space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <div className={`flex items-center gap-2 text-xs ${showCompleted ? 'text-nexus-accent' : 'text-nexus-muted'}`}>
-          {showCompleted ? (
-            <CheckCircle2 className="w-3.5 h-3.5" />
-          ) : (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          )}
-          {showCompleted ? `Task completed${timing}` : 'Search in motion'}
-        </div>
-        {showCompleted && (
-          <div className="shrink-0">
-            <SessionFeedbackRow sessionId={sessionId} />
-          </div>
+    <div className="flex flex-wrap items-center gap-3 pt-2">
+      <button
+        type="button"
+        onClick={() => {
+          if (query && showCompleted) {
+            setActiveResultQuery(query)
+          }
+        }}
+        className={cn(
+          'inline-flex items-center gap-2.5 rounded-xl border px-3.5 py-2 text-xs font-medium transition shadow-sm',
+          showCompleted
+            ? showEmpty
+              ? 'border-amber-400/25 bg-amber-400/8 text-amber-200'
+              : isSelected
+                ? 'border-nexus-accent bg-nexus-accent/15 text-nexus-accent shadow-[0_0_12px_rgba(34,197,94,0.15)] ring-1 ring-nexus-accent/30'
+                : 'border-nexus-border bg-nexus-card/50 text-nexus-text/90 cursor-pointer hover:border-nexus-accent/50 hover:bg-nexus-accent/5'
+            : status === 'error'
+              ? 'border-red-400/25 bg-red-500/8 text-red-300'
+              : 'border-nexus-border bg-nexus-surface/50 text-nexus-muted'
         )}
-      </div>
-      <div
-        className={`flex min-w-0 max-w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm transition-colors ${
-          isSelected
-            ? 'border-nexus-accent/40 bg-nexus-accent/5'
-            : 'border-nexus-border bg-nexus-card/70'
-        }`}
       >
-        <button
-          type="button"
-          onClick={onOpen}
-          className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left hover:text-nexus-accent transition-colors"
-          title="Open results table"
-        >
-          <span
-            className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
-              showCompleted
-                ? 'border-nexus-accent/30 bg-nexus-accent/10 text-nexus-accent'
-                : 'border-nexus-border bg-nexus-elevated/60 text-nexus-muted'
-            }`}
-          >
-            <Table2 className="h-3 w-3" />
-          </span>
-          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-nexus-muted">
-            Results
-          </span>
-          <span className="min-w-0 truncate whitespace-nowrap">{title || 'Results'}</span>
-        </button>
-        {showInProgress && <span className="text-[11px] text-nexus-muted">Running…</span>}
-      </div>
+        {showCompleted ? (
+          <Table2 className="h-3.5 w-3.5 text-nexus-accent" />
+        ) : status === 'error' ? (
+          <AlertCircle className="h-3.5 w-3.5 text-red-400" />
+        ) : (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        )}
+        <span className="truncate max-w-[240px]">
+          {showCompleted
+            ? `${countLabel}${timing}`
+            : status === 'error'
+              ? 'Error resolving results'
+              : 'Refining discovery pipeline…'}
+        </span>
+      </button>
+
+      {showCompleted && (
+        <div className="flex items-center gap-4 animate-slide-in">
+          <div className="flex items-center gap-1.5 py-1">
+            <div className="w-1.5 h-1.5 rounded-full bg-nexus-accent animate-pulse" />
+            <span className="text-[11px] font-semibold text-nexus-accent uppercase tracking-wider">Task Completed!!</span>
+          </div>
+          <div className="h-4 w-px bg-nexus-border/50" />
+          <SessionFeedbackRow sessionId={sessionId} />
+        </div>
+      )}
     </div>
   )
 }
