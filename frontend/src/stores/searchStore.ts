@@ -460,7 +460,6 @@ export const useSearchStore = create<SearchState>((set, get) => ({
       pendingQuery: null,
       activeThreadTurns: [], // IMPORTANT: Clear current view while loading next
     }),
-  setActiveResultQuery: (query) => set({ activeResultQuery: query }),
 
   addStreamEvent: (event) =>
     set((state) => ({
@@ -520,7 +519,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   },
 
   setSearching: (v) =>
-    set((state) => ({
+    set(() => ({
       isSearching: v,
       ...(v === false ? { pendingQuery: null } : {}),
     })),

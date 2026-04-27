@@ -103,7 +103,6 @@ function partitionStreamEvents(events: StreamEvent[]) {
 
   for (const e of events) {
     if (e.type === 'complete') {
-      seenComplete = true
       continue
     }
     if (e.type === 'persona_chunk') {
