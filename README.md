@@ -190,3 +190,4 @@ Visit [`http://localhost:5173`](http://localhost:5173).
 
 ---
 *For a deeper dive into backend operations, metrics endpoints, schema mapping, and deployment routines, see the [Architecture Overview](docs/architecture.md).*
+<!-- Last CI Trigger: Tue Apr 28 11:40:13 AM EAT 2026 -->
