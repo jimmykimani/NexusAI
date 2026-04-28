@@ -163,10 +163,25 @@ def llm_chat(
     """Single-shot chat completion with automatic provider fallback."""
     primary_provider = effective_provider()
     
-    # Re-order fallback chain to start with primary
-    chain = [(primary_provider, None)] + [
-        (p, None) for p, t in FALLBACK_CHAIN if p != primary_provider
-    ]
+    # Re-order fallback chain and filter out providers with missing keys
+    chain = []
+    
+    def _has_key(p: str) -> bool:
+        if p == "openai": return bool((settings.OPENAI_API_KEY or "").strip())
+        if p == "groq": return bool((settings.GROQ_API_KEY or "").strip())
+        if p == "openrouter": return bool((settings.OPENROUTER_API_KEY or "").strip())
+        if p == "anthropic": return bool((settings.ANTHROPIC_API_KEY or "").strip())
+        return False
+
+    # Primary first
+    if _has_key(primary_provider):
+        chain.append((primary_provider, None))
+    
+    # Then fallbacks (excluding primary if already added)
+    for p, t in FALLBACK_CHAIN:
+        if p != primary_provider and _has_key(p):
+            chain.append((p, t))
+
 
     last_exc = None
     for provider, tier_override in chain:

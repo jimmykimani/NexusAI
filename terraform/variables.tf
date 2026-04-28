@@ -36,3 +36,22 @@ variable "groq_api_key" {
   sensitive = true
   default   = ""
 }
+
+variable "openrouter_api_key" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "anthropic_api_key" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "clerk_secret_key" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
