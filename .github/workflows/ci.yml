@@ -173,5 +173,5 @@ jobs:
         run: |
           aws amplify start-job \
             --app-id ${{ secrets.AMPLIFY_APP_ID }} \
-            --branch-name main \
+            --branch-name ${{ github.ref_name }} \
             --job-type RELEASE

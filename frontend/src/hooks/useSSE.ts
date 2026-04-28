@@ -41,9 +41,6 @@ export function useSSE(sessionId: string | null, streamEpoch: number): void {
       const llmSuffix = p.toString() ? `&${p.toString()}` : ''
 
       const url = await buildSseUrl(sessionId!, llmSuffix)
-      if (llm) {
-        state.setStreamLlmParams(null)
-      }
       if (cancelled) return
       es = new EventSource(url)
       esRef.current = es

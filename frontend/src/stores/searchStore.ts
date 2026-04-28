@@ -335,14 +335,15 @@ export const useSearchStore = create<SearchState>((set, get) => ({
     })),
 
   startSearch: async (query) => {
-    if (!query.trim()) return null
+    const trimmed = query.trim()
+    if (!trimmed || get().isSearching) return null
     const contIdRaw = get().activeSessionId
     const continueSessionId =
       contIdRaw && !contIdRaw.startsWith('local-') ? contIdRaw : undefined
     const isContinuing = Boolean(continueSessionId)
     set(() => ({
       isSearching: true,
-      pendingQuery: query,
+      pendingQuery: trimmed,
       streamEvents: [],
       ...(isContinuing
         ? {}
@@ -521,7 +522,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   setSearching: (v) =>
     set(() => ({
       isSearching: v,
-      ...(v === false ? { pendingQuery: null } : {}),
+      ...(v === false ? { pendingQuery: null, streamLlmParams: null } : {}),
     })),
 
   resetCurrent: () =>
