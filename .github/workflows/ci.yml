@@ -150,7 +150,7 @@ jobs:
         run: |
           aws ecs update-service \
             --cluster nexusai-cluster \
-            --service nexusai-backend \
+            --service nexusai-service \
             --force-new-deployment
 
   # ── Job 5: Deploy Frontend to Amplify ───────────────────────────
