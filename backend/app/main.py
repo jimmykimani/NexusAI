@@ -123,34 +123,36 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# --- SURGICAL PROD CORS FIX ---
+# --- SURGICAL PROD CORS FIX v2 ---
 @app.middleware("http")
 async def surgical_cors_middleware(request: Request, call_next):
     origin = request.headers.get("origin", "")
-    logger.info("Incoming Request: path=%s, method=%s, origin=%s", request.url.path, request.method, origin)
+    logger.info("CORS Request: origin=%s, path=%s", origin, request.url.path)
     
     if request.method == "OPTIONS":
         response = JSONResponse(content="OK")
     else:
         response = await call_next(request)
     
-    # Allow any NexusAI demo variations
-    if "amplifyapp.com" in origin or "localhost" in origin:
-        response.headers["Access-Control-Allow-Origin"] = origin
+    # Mirror the origin if it looks like ours
+    if "amplifyapp.com" in origin or "localhost" in origin or not origin:
+        target_origin = origin if origin else "*"
+        response.headers["Access-Control-Allow-Origin"] = target_origin
         response.headers["Access-Control-Allow-Methods"] = "*"
         response.headers["Access-Control-Allow-Headers"] = "*"
         response.headers["Access-Control-Allow-Credentials"] = "true"
     
     return response
 
-# Standard middleware (kept as fallback)
+# Standard middleware (kept as second layer)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=["*"], # Set to * because our surgical middleware handles the credentialed match
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=True,
 )
+
 
 
 
