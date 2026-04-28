@@ -83,7 +83,9 @@ class Settings(BaseSettings):
         default_factory=lambda: [
             "http://localhost:5173",
             "https://master.d2ueqn9r8bxre.amplifyapp.com",
+            "https://master.d2ueqn9r8b4xre.amplifyapp.com",
         ]
+
 
     )
 

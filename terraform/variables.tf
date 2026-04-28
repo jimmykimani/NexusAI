@@ -55,3 +55,9 @@ variable "clerk_secret_key" {
   default   = ""
 }
 
+variable "cors_origins" {
+  type    = string
+  default = "https://master.d2ueqn9r8bxre.amplifyapp.com"
+}
+
+

@@ -81,7 +81,9 @@ resource "aws_ecs_task_definition" "app" {
       { name = "GROQ_API_KEY", value = var.groq_api_key },
       { name = "OPENROUTER_API_KEY", value = var.openrouter_api_key },
       { name = "ANTHROPIC_API_KEY", value = var.anthropic_api_key },
-      { name = "CLERK_SECRET_KEY", value = var.clerk_secret_key }
+      { name = "CLERK_SECRET_KEY", value = var.clerk_secret_key },
+      { name = "CORS_ORIGINS", value = var.cors_origins }
+
 
     ]
   }])
